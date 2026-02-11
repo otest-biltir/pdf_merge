@@ -24,11 +24,23 @@ Bu yüzden normal kullanımda çözünürlük kaybı oluşmaz.
 
 ## Kurulum
 
+### Windows (PowerShell)
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+### macOS/Linux
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install pypdf
+pip install -r requirements.txt
 ```
+
+> Not: Uygulama öncelikle `pypdf` paketini kullanır. İsterseniz `pip install pypdf` ile tek başına da kurabilirsiniz.
 
 ## Çalıştırma
 
@@ -41,3 +53,17 @@ python main.py
 - Uygulama açıldığında modu seçin.
 - İlgili PDF dosyalarını seçin.
 - `Birleştir ve Kaydet` ile çıktı dosyasını kaydedin.
+
+## Sık Karşılaşılan Hata
+
+Eğer aşağıdaki gibi bir hata alırsanız:
+
+```text
+ModuleNotFoundError: No module named 'pypdf'
+```
+
+aktif sanal ortam içinde şu komutu çalıştırın:
+
+```bash
+pip install -r requirements.txt
+```

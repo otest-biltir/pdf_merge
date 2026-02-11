@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import importlib.util
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from pypdf import PdfReader, PdfWriter
+if importlib.util.find_spec("pypdf") is not None:
+    from pypdf import PdfReader, PdfWriter
+    PDF_BACKEND = "pypdf"
+elif importlib.util.find_spec("PyPDF2") is not None:
+    from PyPDF2 import PdfReader, PdfWriter
+    PDF_BACKEND = "PyPDF2"
+else:
+    PdfReader = None
+    PdfWriter = None
+    PDF_BACKEND = None
 
 
 class PdfMergeApp:
@@ -39,6 +49,10 @@ class PdfMergeApp:
             justify="center",
         )
         subtitle.pack(pady=(0, 16))
+
+        backend_text = f"PDF altyapısı: {PDF_BACKEND}" if PDF_BACKEND else "PDF altyapısı: Bulunamadı"
+        backend_label = ttk.Label(self.root, text=backend_text)
+        backend_label.pack(pady=(0, 10))
 
         mode_box = ttk.LabelFrame(self.root, text="Mod Seçimi", padding=12)
         mode_box.pack(fill="x", padx=16)
@@ -223,10 +237,27 @@ class PdfMergeApp:
             self.merge_listbox.insert(tk.END, path.name)
 
     def _merge_and_save(self) -> None:
+        if not self._validate_pdf_backend():
+            return
+
         if self.mode_var.get() == "signed":
             self._run_signed_mode()
         else:
             self._run_merge_mode()
+
+    def _validate_pdf_backend(self) -> bool:
+        if PDF_BACKEND is not None:
+            return True
+
+        messagebox.showerror(
+            "Eksik bağımlılık",
+            "PDF işlemek için gerekli paket bulunamadı.\n\n"
+            "Kurulum:\n"
+            "- pip install -r requirements.txt\n"
+            "veya\n"
+            "- pip install pypdf",
+        )
+        return False
 
     def _run_signed_mode(self) -> None:
         if self.signature_pdf is None or self.report_pdf is None:
@@ -302,8 +333,8 @@ class PdfMergeApp:
 
 def main() -> None:
     root = tk.Tk()
-    root.style = ttk.Style()  # type: ignore[attr-defined]
-    root.style.theme_use("clam")  # type: ignore[attr-defined]
+    style = ttk.Style(root)
+    style.theme_use("clam")
     PdfMergeApp(root)
     root.mainloop()
 
