@@ -48,6 +48,40 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## EXE Oluşturma (Windows)
+
+Projede `build_exe.py` dosyası bulunur. Bu dosya PyInstaller'ı kontrol eder ve gerekirse kurarak `.exe` üretir.
+
+```powershell
+python build_exe.py
+```
+
+Başarılı build sonrası çıktı:
+
+```text
+dist\pdf_merge.exe
+```
+
+### Ek Parametreler
+
+- Konsol açık exe üretmek için:
+
+```powershell
+python build_exe.py --console
+```
+
+- Tek exe yerine klasör çıktısı için:
+
+```powershell
+python build_exe.py --onedir
+```
+
+- Sadece yapılacak adımları görmek için:
+
+```powershell
+python build_exe.py --dry-run
+```
+
 ## Kullanım Akışı
 
 - Uygulama açıldığında modu seçin.
