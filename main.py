@@ -12,8 +12,10 @@ from typing import Any, Protocol
 from db_helpers import DatabaseLookupError, fetch_test_numbers, get_main_path_for_test, iter_test_sources
 from report_storage import (
     ReportFolderResolutionError,
-    move_or_copy_merged_pdf,
+    build_default_signed_filename,
+    find_existing_signed_pdfs,
     resolve_report_pdf_folder,
+    resolve_versioned_target_path,
 )
 
 
@@ -114,7 +116,6 @@ class PdfMergeApp:
         self._preview_mouse_inside = False
         self.source_var = tk.StringVar()
         self.test_var = tk.StringVar()
-        self.target_filename_var = tk.StringVar()
 
         self._build_ui()
         self._refresh_mode_frames()
@@ -228,11 +229,10 @@ class PdfMergeApp:
         self.test_combo.grid(row=3, column=0, sticky="ew", pady=(2, 6))
         self.test_combo.bind("<<ComboboxSelected>>", self._on_test_selected)
 
-        ttk.Label(db_frame, text="Kopya Dosya Adı (opsiyonel)").grid(row=4, column=0, sticky="w")
-        ttk.Entry(db_frame, textvariable=self.target_filename_var).grid(row=5, column=0, sticky="ew", pady=(2, 0))
+        ttk.Label(db_frame, text="Dosya adı otomatik: <yıl>_<testno>_Signed.pdf").grid(row=4, column=0, sticky="w", pady=(2, 0))
 
         ttk.Button(db_frame, text="Testleri Yenile", command=self._refresh_test_sources).grid(
-            row=6, column=0, sticky="ew", pady=(8, 0)
+            row=5, column=0, sticky="ew", pady=(8, 0)
         )
 
         self._refresh_test_sources()
@@ -622,14 +622,9 @@ class PdfMergeApp:
             self._on_test_selected()
         else:
             self.test_var.set("")
-            self.target_filename_var.set("")
 
     def _on_test_selected(self, _: tk.Event | None = None) -> None:
-        test_no = self.test_var.get().strip()
-        if not test_no:
-            self.target_filename_var.set("")
-            return
-        self.target_filename_var.set(f"{test_no}_Signed.pdf")
+        return
 
     def _merge_and_save(self) -> None:
         if not self._validate_pdf_backend():
@@ -723,6 +718,10 @@ class PdfMergeApp:
         self._save_writer(writer, signed_mode=False)
 
     def _save_writer(self, writer: PdfWriterProtocol, *, signed_mode: bool) -> None:
+        if signed_mode:
+            self._save_signed_writer_to_test_folder(writer)
+            return
+
         save_path = filedialog.asksaveasfilename(
             title="Birleşik PDF dosyasını kaydet",
             defaultextension=".pdf",
@@ -738,47 +737,54 @@ class PdfMergeApp:
             messagebox.showerror("Kaydetme hatası", f"Dosya kaydedilemedi:\n{exc}")
             return
 
-        if signed_mode:
-            self._copy_signed_pdf_to_report_folder(Path(save_path))
-            return
-
         messagebox.showinfo("Başarılı", "PDF dosyası başarıyla birleştirildi ve kaydedildi.")
 
-    def _copy_signed_pdf_to_report_folder(self, merged_path: Path) -> None:
+    def _save_signed_writer_to_test_folder(self, writer: PdfWriterProtocol) -> None:
         source_name = self.source_var.get().strip()
         test_no = self.test_var.get().strip()
         if not source_name or not test_no:
-            messagebox.showwarning(
+            messagebox.showerror(
                 "Test seçimi eksik",
-                "PDF kaydedildi ancak otomatik kopyalama için kaynak ve test seçimi gerekli.",
+                "İmzalı modda kaydetmek için kaynak ve test seçimi zorunludur.",
             )
             return
 
         try:
             main_path = get_main_path_for_test(test_no=test_no, source_name=source_name)
             target_dir = resolve_report_pdf_folder(main_path)
+            default_filename = build_default_signed_filename(test_no)
+            existing_signed = find_existing_signed_pdfs(target_dir, test_no)
 
-            requested_name = self.target_filename_var.get().strip() or f"{test_no}_Signed.pdf"
-            copied_path = move_or_copy_merged_pdf(
-                merged_pdf_path=merged_path,
-                target_dir=target_dir,
-                filename=requested_name,
-                overwrite=True,
-            )
+            if existing_signed:
+                should_continue = messagebox.askyesno(
+                    "İmzalı PDF zaten var",
+                    "Bu test için imzalanmış PDF bulundu. "
+                    "Aynı isimde değilse kaydetmek istiyor musunuz?",
+                )
+                if not should_continue:
+                    return
+
+            final_path = resolve_versioned_target_path(target_dir, default_filename)
+            with final_path.open("wb") as output_file:
+                writer.write(output_file)
+
         except DatabaseLookupError as exc:
             messagebox.showerror("Veritabanı Hatası", str(exc))
             return
         except ReportFolderResolutionError as exc:
             messagebox.showerror("Hedef Klasör Hatası", str(exc))
             return
+        except ValueError as exc:
+            messagebox.showerror("Dosya Adı Hatası", str(exc))
+            return
         except Exception as exc:  # pragma: no cover
-            messagebox.showerror("Kopyalama Hatası", f"Birleşik PDF kopyalanamadı:\n{exc}")
+            messagebox.showerror("Kaydetme Hatası", f"İmzalı PDF kaydedilemedi:\n{exc}")
             return
 
         messagebox.showinfo(
             "Başarılı",
-            "PDF dosyası başarıyla birleştirildi ve kaydedildi.\n"
-            f"Otomatik kopya: {copied_path}",
+            "İmzalı PDF test klasörüne kaydedildi.\n"
+            f"Hedef dosya: {final_path}",
         )
 
 

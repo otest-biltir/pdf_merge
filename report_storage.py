@@ -13,6 +13,49 @@ def normalize_folder_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", name).lower()
 
 
+def sanitize_test_no_for_filename(test_no: str) -> str:
+    parts = [part for part in re.split(r"[^A-Za-z0-9]+", str(test_no).strip()) if part]
+    return "_".join(parts)
+
+
+def build_default_signed_filename(test_no: str) -> str:
+    normalized = sanitize_test_no_for_filename(test_no)
+    if not normalized:
+        raise ValueError("Geçerli bir test_no bulunamadı.")
+    return f"{normalized}_Signed.pdf"
+
+
+def resolve_versioned_target_path(target_dir: Path, filename: str) -> Path:
+    safe_name = filename.strip()
+    if not safe_name.lower().endswith(".pdf"):
+        safe_name = f"{safe_name}.pdf"
+
+    candidate = target_dir / safe_name
+    if not candidate.exists():
+        return candidate
+
+    stem = candidate.stem
+    suffix = candidate.suffix
+    version = 2
+    while True:
+        versioned = target_dir / f"{stem}_V{version}{suffix}"
+        if not versioned.exists():
+            return versioned
+        version += 1
+
+
+def find_existing_signed_pdfs(target_dir: Path, test_no: str) -> list[Path]:
+    normalized_test = sanitize_test_no_for_filename(test_no).lower()
+    prefix = f"{normalized_test}_signed"
+    matches: list[Path] = []
+    for child in target_dir.iterdir():
+        if not child.is_file() or child.suffix.lower() != ".pdf":
+            continue
+        if child.stem.lower().startswith(prefix):
+            matches.append(child)
+    return sorted(matches)
+
+
 def resolve_report_pdf_folder(main_path: str) -> Path:
     root = Path(main_path)
     if not root.exists() or not root.is_dir():
