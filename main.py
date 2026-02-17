@@ -183,27 +183,48 @@ class PdfMergeApp:
         self.signed_frame.columnconfigure(1, weight=1)
         self.signed_frame.rowconfigure(4, weight=1)
         preview_frame.columnconfigure(0, weight=1)
-        preview_frame.columnconfigure(1, weight=1)
+        preview_frame.rowconfigure(0, weight=1)
+
+        self.preview_canvas = tk.Canvas(preview_frame, highlightthickness=0)
+        preview_scrollbar = ttk.Scrollbar(preview_frame, orient="vertical", command=self.preview_canvas.yview)
+        self.preview_canvas.configure(yscrollcommand=preview_scrollbar.set)
+
+        self.preview_canvas.grid(row=0, column=0, sticky="nsew")
+        preview_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.preview_content = ttk.Frame(self.preview_canvas)
+        self.preview_canvas_window = self.preview_canvas.create_window(
+            (0, 0),
+            window=self.preview_content,
+            anchor="nw",
+        )
+        self.preview_content.bind("<Configure>", self._on_preview_content_configure)
+        self.preview_canvas.bind("<Configure>", self._on_preview_canvas_configure)
+        self.preview_canvas.bind("<MouseWheel>", self._on_preview_mousewheel)
+        self.preview_canvas.bind("<Button-4>", self._on_preview_mousewheel)
+        self.preview_canvas.bind("<Button-5>", self._on_preview_mousewheel)
 
         self.signature_preview_label = ttk.Label(
-            preview_frame,
+            self.preview_content,
             text="İmza PDF önizlemesi burada görünecek",
             anchor="center",
             justify="center",
             relief="solid",
             padding=8,
         )
-        self.signature_preview_label.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self.signature_preview_label.grid(row=0, column=0, sticky="nsew")
 
         self.report_preview_label = ttk.Label(
-            preview_frame,
+            self.preview_content,
             text="Rapor PDF önizlemesi burada görünecek",
             anchor="center",
             justify="center",
             relief="solid",
             padding=8,
         )
-        self.report_preview_label.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        self.report_preview_label.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+
+        self.preview_content.columnconfigure(0, weight=1)
 
         self.merge_frame = ttk.LabelFrame(
             self.root,
@@ -274,6 +295,23 @@ class PdfMergeApp:
             self.signed_frame.pack(fill="both", expand=True, padx=16, pady=(12, 0))
         else:
             self.merge_frame.pack(fill="both", expand=True, padx=16, pady=(12, 0))
+
+    def _on_preview_content_configure(self, _: tk.Event) -> None:
+        self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox("all"))
+
+    def _on_preview_canvas_configure(self, event: tk.Event) -> None:
+        self.preview_canvas.itemconfigure(self.preview_canvas_window, width=event.width)
+
+    def _on_preview_mousewheel(self, event: tk.Event) -> None:
+        if hasattr(event, "delta") and event.delta:
+            self.preview_canvas.yview_scroll(int(-event.delta / 120), "units")
+            return
+
+        event_num = getattr(event, "num", None)
+        if event_num == 4:
+            self.preview_canvas.yview_scroll(-1, "units")
+        elif event_num == 5:
+            self.preview_canvas.yview_scroll(1, "units")
 
     def _select_signature_pdf(self) -> None:
         path = filedialog.askopenfilename(
