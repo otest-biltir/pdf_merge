@@ -97,26 +97,30 @@ class PdfMergeApp:
             text="PDF Birleştirme Uygulaması",
             font=("Segoe UI", 16, "bold"),
         )
-        title.pack(pady=(18, 6))
-
-        subtitle = ttk.Label(
-            self.root,
-            text=(
-                "İki mod desteklenir: İmzalı PDF birleştirme ve standart PDF birleştirme.\n"
-                "Not: Sayfalar doğrudan kopyalandığı için çözünürlükte kayıp oluşturulmaz."
-            ),
-            justify="center",
-        )
-        subtitle.pack(pady=(0, 16))
+        title.pack(pady=(14, 6))
 
         backend_parts = [f"PDF altyapısı: {PDF_BACKEND}" if PDF_BACKEND else "PDF altyapısı: Bulunamadı"]
         preview_backend = "aktif" if PREVIEW_AVAILABLE else "kapalı (pip install pymupdf)"
         backend_parts.append(f"Önizleme: {preview_backend}")
         backend_label = ttk.Label(self.root, text=" | ".join(backend_parts))
-        backend_label.pack(pady=(0, 10))
+        backend_label.pack(pady=(0, 8))
 
-        mode_box = ttk.LabelFrame(self.root, text="Mod Seçimi", padding=12)
-        mode_box.pack(fill="x", padx=16)
+        self.main_layout = ttk.Frame(self.root)
+        self.main_layout.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.main_layout.columnconfigure(1, weight=1)
+        self.main_layout.rowconfigure(0, weight=1)
+
+        self.sidebar = ttk.Frame(self.main_layout, width=270)
+        self.sidebar.grid(row=0, column=0, sticky="nsw")
+        self.sidebar.grid_propagate(False)
+
+        self.content_area = ttk.Frame(self.main_layout)
+        self.content_area.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        self.content_area.columnconfigure(0, weight=1)
+        self.content_area.rowconfigure(0, weight=1)
+
+        mode_box = ttk.LabelFrame(self.sidebar, text="Mod Seçimi", padding=8)
+        mode_box.pack(fill="x")
 
         ttk.Radiobutton(
             mode_box,
@@ -134,60 +138,60 @@ class PdfMergeApp:
             command=self._refresh_mode_frames,
         ).pack(anchor="w", pady=(6, 0))
 
-        self.signed_frame = ttk.LabelFrame(
-            self.root,
-            text="Mod 1 - İmzalanmış PDF'leri Birleştir",
-            padding=12,
+        ttk.Button(
+            self.sidebar,
+            text="Birleştir ve Kaydet",
+            command=self._merge_and_save,
+        ).pack(fill="x", pady=(8, 10))
+
+        self.signed_controls_frame = ttk.LabelFrame(
+            self.sidebar,
+            text="İmzalı Mod Kontrolleri",
+            padding=8,
         )
 
-        sig_btn = ttk.Button(
-            self.signed_frame,
+        ttk.Button(
+            self.signed_controls_frame,
             text="İmza Sayfası PDF Seç",
             command=self._select_signature_pdf,
-        )
-        sig_btn.grid(row=0, column=0, sticky="w")
+        ).grid(row=0, column=0, sticky="ew")
 
-        self.signature_label = ttk.Label(self.signed_frame, text="Henüz seçilmedi")
-        self.signature_label.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        self.signature_label = ttk.Label(self.signed_controls_frame, text="Henüz seçilmedi", wraplength=230)
+        self.signature_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
 
-        self.signature_rotation_label = ttk.Label(self.signed_frame, text="İmza yönü: 0°")
-        self.signature_rotation_label.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+        self.signature_rotation_label = ttk.Label(self.signed_controls_frame, text="İmza yönü: 0°")
+        self.signature_rotation_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
 
-        sig_rotate_box = ttk.Frame(self.signed_frame)
-        sig_rotate_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
-        ttk.Button(sig_rotate_box, text="İmza Sola 90°", command=lambda: self._rotate_signature(-90)).pack(side="left")
-        ttk.Button(sig_rotate_box, text="İmza Sağa 90°", command=lambda: self._rotate_signature(90)).pack(
-            side="left", padx=(8, 0)
-        )
+        sig_rotate_box = ttk.Frame(self.signed_controls_frame)
+        sig_rotate_box.grid(row=3, column=0, sticky="ew", pady=(4, 8))
+        ttk.Button(sig_rotate_box, text="Sola 90°", command=lambda: self._rotate_signature(-90)).pack(side="left")
+        ttk.Button(sig_rotate_box, text="Sağa 90°", command=lambda: self._rotate_signature(90)).pack(side="left", padx=(6, 0))
 
-        report_btn = ttk.Button(
-            self.signed_frame,
+        ttk.Button(
+            self.signed_controls_frame,
             text="Rapor PDF Seç",
             command=self._select_report_pdf,
-        )
-        report_btn.grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=4, column=0, sticky="ew")
 
-        self.report_label = ttk.Label(self.signed_frame, text="Henüz seçilmedi")
-        self.report_label.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+        self.report_label = ttk.Label(self.signed_controls_frame, text="Henüz seçilmedi", wraplength=230)
+        self.report_label.grid(row=5, column=0, sticky="w", pady=(4, 0))
 
-        self.report_rotation_label = ttk.Label(self.signed_frame, text="Rapor yönü: 0°")
-        self.report_rotation_label.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+        self.report_rotation_label = ttk.Label(self.signed_controls_frame, text="Rapor yönü: 0°")
+        self.report_rotation_label.grid(row=6, column=0, sticky="w", pady=(4, 0))
 
-        report_rotate_box = ttk.Frame(self.signed_frame)
-        report_rotate_box.grid(row=3, column=0, sticky="w", pady=(4, 0))
-        ttk.Button(report_rotate_box, text="Rapor Sola 90°", command=lambda: self._rotate_report(-90)).pack(side="left")
-        ttk.Button(report_rotate_box, text="Rapor Sağa 90°", command=lambda: self._rotate_report(90)).pack(
-            side="left", padx=(8, 0)
-        )
+        report_rotate_box = ttk.Frame(self.signed_controls_frame)
+        report_rotate_box.grid(row=7, column=0, sticky="ew", pady=(4, 0))
+        ttk.Button(report_rotate_box, text="Sola 90°", command=lambda: self._rotate_report(-90)).pack(side="left")
+        ttk.Button(report_rotate_box, text="Sağa 90°", command=lambda: self._rotate_report(90)).pack(side="left", padx=(6, 0))
 
-        preview_frame = ttk.LabelFrame(self.signed_frame, text="PDF Önizlemeleri", padding=8)
-        preview_frame.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
-        self.signed_frame.columnconfigure(1, weight=1)
-        self.signed_frame.rowconfigure(4, weight=1)
-        preview_frame.columnconfigure(0, weight=1)
-        preview_frame.rowconfigure(1, weight=1)
+        self.signed_controls_frame.columnconfigure(0, weight=1)
 
-        zoom_row = ttk.Frame(preview_frame)
+        self.preview_frame = ttk.LabelFrame(self.content_area, text="PDF Önizlemeleri", padding=8)
+        self.preview_frame.grid(row=0, column=0, sticky="nsew")
+        self.preview_frame.columnconfigure(0, weight=1)
+        self.preview_frame.rowconfigure(1, weight=1)
+
+        zoom_row = ttk.Frame(self.preview_frame)
         zoom_row.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         zoom_row.columnconfigure(1, weight=1)
 
@@ -195,7 +199,7 @@ class PdfMergeApp:
         zoom_scale = ttk.Scale(
             zoom_row,
             from_=0.12,
-            to=0.45,
+            to=0.85,
             orient="horizontal",
             variable=self.preview_zoom_var,
             command=self._on_preview_scale_change,
@@ -204,8 +208,8 @@ class PdfMergeApp:
         self.zoom_value_label = ttk.Label(zoom_row, text="%22")
         self.zoom_value_label.grid(row=0, column=2, sticky="e")
 
-        self.preview_canvas = tk.Canvas(preview_frame, highlightthickness=0)
-        preview_scrollbar = ttk.Scrollbar(preview_frame, orient="vertical", command=self.preview_canvas.yview)
+        self.preview_canvas = tk.Canvas(self.preview_frame, highlightthickness=0)
+        preview_scrollbar = ttk.Scrollbar(self.preview_frame, orient="vertical", command=self.preview_canvas.yview)
         self.preview_canvas.configure(yscrollcommand=preview_scrollbar.set)
 
         self.preview_canvas.grid(row=1, column=0, sticky="nsew")
@@ -243,7 +247,7 @@ class PdfMergeApp:
         self.report_preview_container.columnconfigure(0, weight=1)
 
         self.merge_frame = ttk.LabelFrame(
-            self.root,
+            self.content_area,
             text="Mod 2 - PDF'leri Birleştir",
             padding=12,
         )
@@ -294,23 +298,16 @@ class PdfMergeApp:
             command=self._remove_selected,
         ).pack(side="left", padx=(8, 0))
 
-        action_row = ttk.Frame(self.root)
-        action_row.pack(fill="x", padx=16, pady=16)
-
-        ttk.Button(
-            action_row,
-            text="Birleştir ve Kaydet",
-            command=self._merge_and_save,
-        ).pack(side="right")
-
     def _refresh_mode_frames(self) -> None:
-        self.signed_frame.pack_forget()
-        self.merge_frame.pack_forget()
+        self.signed_controls_frame.pack_forget()
+        self.preview_frame.grid_remove()
+        self.merge_frame.grid_remove()
 
         if self.mode_var.get() == "signed":
-            self.signed_frame.pack(fill="both", expand=True, padx=16, pady=(12, 0))
+            self.signed_controls_frame.pack(fill="x")
+            self.preview_frame.grid(row=0, column=0, sticky="nsew")
         else:
-            self.merge_frame.pack(fill="both", expand=True, padx=16, pady=(12, 0))
+            self.merge_frame.grid(row=0, column=0, sticky="nsew")
 
     def _on_preview_content_configure(self, _: tk.Event) -> None:
         self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox("all"))
