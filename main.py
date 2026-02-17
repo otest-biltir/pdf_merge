@@ -117,7 +117,7 @@ class PdfMergeApp:
         self._preview_mouse_inside = False
         self.source_var = tk.StringVar()
         self.test_var = tk.StringVar()
-        self.signed_filename_preview_var = tk.StringVar(value="<yıl>_<testno>_Signed.pdf")
+        self.signed_filename_preview_var = tk.StringVar(value="<yıl>_<testno>_Report_Signed.pdf")
 
         self._progress_window: tk.Toplevel | None = None
         self._progress_message_var = tk.StringVar(value="")
@@ -735,13 +735,13 @@ class PdfMergeApp:
     def _on_test_selected(self, _: tk.Event | None = None) -> None:
         test_no = self.test_var.get().strip()
         if not test_no:
-            self.signed_filename_preview_var.set("<yıl>_<testno>_Signed.pdf")
+            self.signed_filename_preview_var.set("<yıl>_<testno>_Report_Signed.pdf")
             return
 
         try:
             self.signed_filename_preview_var.set(build_default_signed_filename(test_no))
         except ValueError:
-            self.signed_filename_preview_var.set("<yıl>_<testno>_Signed.pdf")
+            self.signed_filename_preview_var.set("<yıl>_<testno>_Report_Signed.pdf")
 
     def _merge_and_save(self) -> None:
         if not self._validate_pdf_backend():

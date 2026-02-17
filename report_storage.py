@@ -22,7 +22,7 @@ def build_default_signed_filename(test_no: str) -> str:
     normalized = sanitize_test_no_for_filename(test_no)
     if not normalized:
         raise ValueError("Geçerli bir test_no bulunamadı.")
-    return f"{normalized}_Signed.pdf"
+    return f"{normalized}_Report_Signed.pdf"
 
 
 def resolve_versioned_target_path(target_dir: Path, filename: str) -> Path:
@@ -46,12 +46,16 @@ def resolve_versioned_target_path(target_dir: Path, filename: str) -> Path:
 
 def find_existing_signed_pdfs(target_dir: Path, test_no: str) -> list[Path]:
     normalized_test = sanitize_test_no_for_filename(test_no).lower()
-    prefix = f"{normalized_test}_signed"
+    prefixes = (
+        f"{normalized_test}_report_signed",
+        f"{normalized_test}_signed",  # backward compatibility for old files
+    )
     matches: list[Path] = []
     for child in target_dir.iterdir():
         if not child.is_file() or child.suffix.lower() != ".pdf":
             continue
-        if child.stem.lower().startswith(prefix):
+        stem = child.stem.lower()
+        if any(stem.startswith(prefix) for prefix in prefixes):
             matches.append(child)
     return sorted(matches)
 
