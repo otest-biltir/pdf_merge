@@ -5,6 +5,7 @@ import importlib.util
 import subprocess
 import sys
 import tkinter as tk
+from contextlib import contextmanager
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Protocol
@@ -117,6 +118,10 @@ class PdfMergeApp:
         self.source_var = tk.StringVar()
         self.test_var = tk.StringVar()
         self.signed_filename_preview_var = tk.StringVar(value="<yıl>_<testno>_Signed.pdf")
+
+        self._progress_window: tk.Toplevel | None = None
+        self._progress_message_var = tk.StringVar(value="")
+        self._progress_bar: ttk.Progressbar | None = None
 
         self._build_ui()
         self._refresh_mode_frames()
@@ -338,6 +343,54 @@ class PdfMergeApp:
         else:
             self.merge_frame.grid(row=0, column=0, sticky="nsew")
 
+    def _show_progress(self, message: str) -> None:
+        if self._progress_window is None or not self._progress_window.winfo_exists():
+            self._progress_window = tk.Toplevel(self.root)
+            self._progress_window.title("İşlem devam ediyor")
+            self._progress_window.transient(self.root)
+            self._progress_window.resizable(False, False)
+
+            container = ttk.Frame(self._progress_window, padding=12)
+            container.pack(fill="both", expand=True)
+
+            ttk.Label(container, textvariable=self._progress_message_var, wraplength=280).pack(anchor="w")
+            self._progress_bar = ttk.Progressbar(container, mode="indeterminate", length=280)
+            self._progress_bar.pack(fill="x", pady=(10, 0))
+
+            self._progress_window.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        self._progress_message_var.set(message)
+        if self._progress_bar is not None:
+            self._progress_bar.start(12)
+
+        self.root.config(cursor="watch")
+        self.root.update_idletasks()
+        self.root.update()
+
+    def _update_progress(self, message: str | None = None) -> None:
+        if message:
+            self._progress_message_var.set(message)
+        self.root.update_idletasks()
+        self.root.update()
+
+    def _hide_progress(self) -> None:
+        if self._progress_bar is not None:
+            self._progress_bar.stop()
+        if self._progress_window is not None and self._progress_window.winfo_exists():
+            self._progress_window.destroy()
+        self._progress_window = None
+        self._progress_bar = None
+        self.root.config(cursor="")
+        self.root.update_idletasks()
+
+    @contextmanager
+    def _progress_feedback(self, message: str):
+        self._show_progress(message)
+        try:
+            yield
+        finally:
+            self._hide_progress()
+
     def _on_preview_canvas_configure(self, event: tk.Event) -> None:
         bbox = self.preview_canvas.bbox("all")
         if bbox is None:
@@ -408,7 +461,8 @@ class PdfMergeApp:
             return
         self.signature_pdf = Path(path)
         self.signature_label.config(text=self.signature_pdf.name)
-        self._update_signature_preview()
+        with self._progress_feedback("İmza PDF önizlemesi hazırlanıyor..."):
+            self._update_signature_preview()
 
     def _select_report_pdf(self) -> None:
         initial_dir = self._get_test_target_directory_for_dialog()
@@ -424,7 +478,8 @@ class PdfMergeApp:
             return
         self.report_pdf = Path(path)
         self.report_label.config(text=self.report_pdf.name)
-        self._update_report_preview()
+        with self._progress_feedback("Rapor PDF önizlemesi hazırlanıyor..."):
+            self._update_report_preview()
 
     def _rotate_signature(self, step: int) -> None:
         self.signature_rotation = (self.signature_rotation + step) % 360
@@ -705,8 +760,9 @@ class PdfMergeApp:
             return
 
         try:
-            signature_reader = PdfReader(str(self.signature_pdf))
-            report_reader = PdfReader(str(self.report_pdf))
+            with self._progress_feedback("PDF dosyaları okunuyor..."):
+                signature_reader = PdfReader(str(self.signature_pdf))
+                report_reader = PdfReader(str(self.report_pdf))
         except Exception as exc:  # pragma: no cover
             messagebox.showerror("Dosya okuma hatası", f"PDF dosyaları açılamadı:\n{exc}")
             return
@@ -720,11 +776,16 @@ class PdfMergeApp:
 
         writer = PdfWriter()
 
-        for page in signature_reader.pages:
-            writer.add_page(self._apply_rotation(page, self.signature_rotation))
+        with self._progress_feedback("PDF sayfaları birleştiriliyor..."):
+            for idx, page in enumerate(signature_reader.pages):
+                writer.add_page(self._apply_rotation(page, self.signature_rotation))
+                if idx % 3 == 0:
+                    self._update_progress()
 
-        for page in report_reader.pages[1:]:
-            writer.add_page(self._apply_rotation(page, self.report_rotation))
+            for idx, page in enumerate(report_reader.pages[1:]):
+                writer.add_page(self._apply_rotation(page, self.report_rotation))
+                if idx % 3 == 0:
+                    self._update_progress()
 
         self._save_writer(writer, signed_mode=True)
 
@@ -739,10 +800,15 @@ class PdfMergeApp:
         writer = PdfWriter()
 
         try:
-            for pdf_path in self.merge_pdfs:
-                reader = PdfReader(str(pdf_path))
-                for page in reader.pages:
-                    writer.add_page(page)
+            with self._progress_feedback("PDF dosyaları birleştiriliyor..."):
+                for pdf_idx, pdf_path in enumerate(self.merge_pdfs):
+                    reader = PdfReader(str(pdf_path))
+                    for page_idx, page in enumerate(reader.pages):
+                        writer.add_page(page)
+                        if page_idx % 3 == 0:
+                            self._update_progress()
+                    if pdf_idx % 1 == 0:
+                        self._update_progress()
         except Exception as exc:  # pragma: no cover
             messagebox.showerror("Dosya işleme hatası", f"PDF birleştirme sırasında hata oluştu:\n{exc}")
             return
@@ -763,8 +829,9 @@ class PdfMergeApp:
             return
 
         try:
-            with open(save_path, "wb") as output_file:
-                writer.write(output_file)
+            with self._progress_feedback("PDF dosyası kaydediliyor..."):
+                with open(save_path, "wb") as output_file:
+                    writer.write(output_file)
         except Exception as exc:  # pragma: no cover
             messagebox.showerror("Kaydetme hatası", f"Dosya kaydedilemedi:\n{exc}")
             return
@@ -797,8 +864,9 @@ class PdfMergeApp:
                     return
 
             final_path = resolve_versioned_target_path(target_dir, default_filename)
-            with final_path.open("wb") as output_file:
-                writer.write(output_file)
+            with self._progress_feedback("İmzalı PDF test klasörüne kaydediliyor..."):
+                with final_path.open("wb") as output_file:
+                    writer.write(output_file)
 
         except DatabaseLookupError as exc:
             messagebox.showerror("Veritabanı Hatası", str(exc))
