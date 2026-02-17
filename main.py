@@ -116,6 +116,7 @@ class PdfMergeApp:
         self._preview_mouse_inside = False
         self.source_var = tk.StringVar()
         self.test_var = tk.StringVar()
+        self.signed_filename_preview_var = tk.StringVar(value="<yıl>_<testno>_Signed.pdf")
 
         self._build_ui()
         self._refresh_mode_frames()
@@ -167,56 +168,14 @@ class PdfMergeApp:
             command=self._refresh_mode_frames,
         ).pack(anchor="w", pady=(6, 0))
 
-        ttk.Button(
-            self.sidebar,
-            text="Birleştir ve Kaydet",
-            command=self._merge_and_save,
-        ).pack(fill="x", pady=(8, 10))
-
         self.signed_controls_frame = ttk.LabelFrame(
             self.sidebar,
             text="İmzalı Mod Kontrolleri",
             padding=8,
         )
 
-        ttk.Button(
-            self.signed_controls_frame,
-            text="İmza Sayfası PDF Seç",
-            command=self._select_signature_pdf,
-        ).grid(row=0, column=0, sticky="ew")
-
-        self.signature_label = ttk.Label(self.signed_controls_frame, text="Henüz seçilmedi", wraplength=230)
-        self.signature_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
-
-        self.signature_rotation_label = ttk.Label(self.signed_controls_frame, text="İmza yönü: 0°")
-        self.signature_rotation_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
-
-        sig_rotate_box = ttk.Frame(self.signed_controls_frame)
-        sig_rotate_box.grid(row=3, column=0, sticky="ew", pady=(4, 8))
-        ttk.Button(sig_rotate_box, text="Sola 90°", command=lambda: self._rotate_signature(-90)).pack(side="left")
-        ttk.Button(sig_rotate_box, text="Sağa 90°", command=lambda: self._rotate_signature(90)).pack(side="left", padx=(6, 0))
-
-        ttk.Button(
-            self.signed_controls_frame,
-            text="Rapor PDF Seç",
-            command=self._select_report_pdf,
-        ).grid(row=4, column=0, sticky="ew")
-
-        self.report_label = ttk.Label(self.signed_controls_frame, text="Henüz seçilmedi", wraplength=230)
-        self.report_label.grid(row=5, column=0, sticky="w", pady=(4, 0))
-
-        self.report_rotation_label = ttk.Label(self.signed_controls_frame, text="Rapor yönü: 0°")
-        self.report_rotation_label.grid(row=6, column=0, sticky="w", pady=(4, 0))
-
-        report_rotate_box = ttk.Frame(self.signed_controls_frame)
-        report_rotate_box.grid(row=7, column=0, sticky="ew", pady=(4, 0))
-        ttk.Button(report_rotate_box, text="Sola 90°", command=lambda: self._rotate_report(-90)).pack(side="left")
-        ttk.Button(report_rotate_box, text="Sağa 90°", command=lambda: self._rotate_report(90)).pack(side="left", padx=(6, 0))
-
-        self.signed_controls_frame.columnconfigure(0, weight=1)
-
         db_frame = ttk.LabelFrame(self.signed_controls_frame, text="Test Hedefi", padding=8)
-        db_frame.grid(row=8, column=0, sticky="ew", pady=(10, 0))
+        db_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         db_frame.columnconfigure(0, weight=1)
 
         ttk.Label(db_frame, text="Kaynak").grid(row=0, column=0, sticky="w")
@@ -229,13 +188,56 @@ class PdfMergeApp:
         self.test_combo.grid(row=3, column=0, sticky="ew", pady=(2, 6))
         self.test_combo.bind("<<ComboboxSelected>>", self._on_test_selected)
 
-        ttk.Label(db_frame, text="Dosya adı otomatik: <yıl>_<testno>_Signed.pdf").grid(row=4, column=0, sticky="w", pady=(2, 0))
+        ttk.Label(db_frame, text="Dosya adı otomatik:").grid(row=4, column=0, sticky="w", pady=(2, 0))
+        ttk.Label(db_frame, textvariable=self.signed_filename_preview_var).grid(row=5, column=0, sticky="w")
 
         ttk.Button(db_frame, text="Testleri Yenile", command=self._refresh_test_sources).grid(
-            row=5, column=0, sticky="ew", pady=(8, 0)
+            row=6, column=0, sticky="ew", pady=(8, 0)
         )
 
+        ttk.Button(
+            self.signed_controls_frame,
+            text="İmza Sayfası PDF Seç",
+            command=self._select_signature_pdf,
+        ).grid(row=1, column=0, sticky="ew")
+
+        self.signature_label = ttk.Label(self.signed_controls_frame, text="Henüz seçilmedi", wraplength=230)
+        self.signature_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
+
+        self.signature_rotation_label = ttk.Label(self.signed_controls_frame, text="İmza yönü: 0°")
+        self.signature_rotation_label.grid(row=3, column=0, sticky="w", pady=(4, 0))
+
+        sig_rotate_box = ttk.Frame(self.signed_controls_frame)
+        sig_rotate_box.grid(row=4, column=0, sticky="ew", pady=(4, 8))
+        ttk.Button(sig_rotate_box, text="Sola 90°", command=lambda: self._rotate_signature(-90)).pack(side="left")
+        ttk.Button(sig_rotate_box, text="Sağa 90°", command=lambda: self._rotate_signature(90)).pack(side="left", padx=(6, 0))
+
+        ttk.Button(
+            self.signed_controls_frame,
+            text="Rapor PDF Seç",
+            command=self._select_report_pdf,
+        ).grid(row=5, column=0, sticky="ew")
+
+        self.report_label = ttk.Label(self.signed_controls_frame, text="Henüz seçilmedi", wraplength=230)
+        self.report_label.grid(row=6, column=0, sticky="w", pady=(4, 0))
+
+        self.report_rotation_label = ttk.Label(self.signed_controls_frame, text="Rapor yönü: 0°")
+        self.report_rotation_label.grid(row=7, column=0, sticky="w", pady=(4, 0))
+
+        report_rotate_box = ttk.Frame(self.signed_controls_frame)
+        report_rotate_box.grid(row=8, column=0, sticky="ew", pady=(4, 0))
+        ttk.Button(report_rotate_box, text="Sola 90°", command=lambda: self._rotate_report(-90)).pack(side="left")
+        ttk.Button(report_rotate_box, text="Sağa 90°", command=lambda: self._rotate_report(90)).pack(side="left", padx=(6, 0))
+
+        self.signed_controls_frame.columnconfigure(0, weight=1)
+
         self._refresh_test_sources()
+
+        ttk.Button(
+            self.sidebar,
+            text="Birleştir ve Kaydet",
+            command=self._merge_and_save,
+        ).pack(side="bottom", fill="x", pady=(8, 10))
 
         self.preview_frame = ttk.LabelFrame(self.content_area, text="PDF Önizlemeleri", padding=8)
         self.preview_frame.grid(row=0, column=0, sticky="nsew")
@@ -380,11 +382,28 @@ class PdfMergeApp:
 
         return max(10, zoom_percent) / 100
 
+    def _get_test_target_directory_for_dialog(self) -> Path | None:
+        source_name = self.source_var.get().strip()
+        test_no = self.test_var.get().strip()
+        if not source_name or not test_no:
+            return None
+
+        try:
+            main_path = get_main_path_for_test(test_no=test_no, source_name=source_name)
+            return resolve_report_pdf_folder(main_path)
+        except Exception:
+            return None
+
     def _select_signature_pdf(self) -> None:
-        path = filedialog.askopenfilename(
-            title="İmza Sayfası PDF Seç",
-            filetypes=[("PDF", "*.pdf")],
-        )
+        initial_dir = self._get_test_target_directory_for_dialog()
+        dialog_kwargs: dict[str, Any] = {
+            "title": "İmza Sayfası PDF Seç",
+            "filetypes": [("PDF", "*.pdf")],
+        }
+        if initial_dir:
+            dialog_kwargs["initialdir"] = str(initial_dir)
+
+        path = filedialog.askopenfilename(**dialog_kwargs)
         if not path:
             return
         self.signature_pdf = Path(path)
@@ -392,10 +411,15 @@ class PdfMergeApp:
         self._update_signature_preview()
 
     def _select_report_pdf(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Rapor PDF Seç",
-            filetypes=[("PDF", "*.pdf")],
-        )
+        initial_dir = self._get_test_target_directory_for_dialog()
+        dialog_kwargs: dict[str, Any] = {
+            "title": "Rapor PDF Seç",
+            "filetypes": [("PDF", "*.pdf")],
+        }
+        if initial_dir:
+            dialog_kwargs["initialdir"] = str(initial_dir)
+
+        path = filedialog.askopenfilename(**dialog_kwargs)
         if not path:
             return
         self.report_pdf = Path(path)
@@ -624,7 +648,15 @@ class PdfMergeApp:
             self.test_var.set("")
 
     def _on_test_selected(self, _: tk.Event | None = None) -> None:
-        return
+        test_no = self.test_var.get().strip()
+        if not test_no:
+            self.signed_filename_preview_var.set("<yıl>_<testno>_Signed.pdf")
+            return
+
+        try:
+            self.signed_filename_preview_var.set(build_default_signed_filename(test_no))
+        except ValueError:
+            self.signed_filename_preview_var.set("<yıl>_<testno>_Signed.pdf")
 
     def _merge_and_save(self) -> None:
         if not self._validate_pdf_backend():
