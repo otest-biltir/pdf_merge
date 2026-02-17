@@ -21,9 +21,22 @@ PdfWriter: Any = None
 PDF_BACKEND: str | None = None
 
 
+def _get_requirements_path() -> Path | None:
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    requirements_path = base_path / "requirements.txt"
+    if requirements_path.exists():
+        return requirements_path
+
+    project_requirements = Path(__file__).with_name("requirements.txt")
+    if project_requirements.exists():
+        return project_requirements
+
+    return None
+
+
 def _install_requirements_if_missing() -> None:
-    requirements_path = Path(__file__).with_name("requirements.txt")
-    if not requirements_path.exists():
+    requirements_path = _get_requirements_path()
+    if requirements_path is None:
         return
 
     dependency_imports = {

@@ -56,10 +56,13 @@ Projede `build_exe.py` dosyası bulunur. Bu dosya PyInstaller'ı kontrol eder ve
 python build_exe.py
 ```
 
+Build script ayrıca `requirements.txt` içindeki bağımlılıkları build öncesi kurar ve exe içine dahil eder.
+Böylece exe çalışırken `pypdf` / önizleme altyapısı (`PyMuPDF`) eksikliği nedeniyle ayrıca manuel kurulum gerekmez.
+
 Başarılı build sonrası çıktı:
 
 ```text
-dist\pdf_merge.exe
+pdf_merge.exe
 ```
 
 ### Ek Parametreler
