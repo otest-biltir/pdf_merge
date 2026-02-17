@@ -21,9 +21,22 @@ PdfWriter: Any = None
 PDF_BACKEND: str | None = None
 
 
+def _get_requirements_path() -> Path | None:
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    requirements_path = base_path / "requirements.txt"
+    if requirements_path.exists():
+        return requirements_path
+
+    project_requirements = Path(__file__).with_name("requirements.txt")
+    if project_requirements.exists():
+        return project_requirements
+
+    return None
+
+
 def _install_requirements_if_missing() -> None:
-    requirements_path = Path(__file__).with_name("requirements.txt")
-    if not requirements_path.exists():
+    requirements_path = _get_requirements_path()
+    if requirements_path is None:
         return
 
     dependency_imports = {
@@ -68,6 +81,9 @@ if importlib.util.find_spec("fitz") is not None:
     PREVIEW_AVAILABLE = True
 
 
+PREVIEW_ZOOM_OPTIONS = [100, 110, 125, 150, 175, 200, 250, 300]
+
+
 class PdfMergeApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -83,9 +99,8 @@ class PdfMergeApp:
         self.signature_rotation = 0
         self.report_rotation = 0
 
-        self.signature_preview_images: list[tk.PhotoImage] = []
-        self.report_preview_images: list[tk.PhotoImage] = []
-        self.preview_zoom_var = tk.DoubleVar(value=0.22)
+        self.preview_images: list[tk.PhotoImage] = []
+        self.preview_zoom_var = tk.StringVar(value="200")
         self._preview_mouse_inside = False
 
         self._build_ui()
@@ -195,18 +210,17 @@ class PdfMergeApp:
         zoom_row.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         zoom_row.columnconfigure(1, weight=1)
 
-        ttk.Label(zoom_row, text="Önizleme Ölçeği (Otomatik dengeli)").grid(row=0, column=0, sticky="w")
-        zoom_scale = ttk.Scale(
+        ttk.Label(zoom_row, text="Önizleme Ölçeği").grid(row=0, column=0, sticky="w")
+        self.zoom_combo = ttk.Combobox(
             zoom_row,
-            from_=0.12,
-            to=0.85,
-            orient="horizontal",
-            variable=self.preview_zoom_var,
-            command=self._on_preview_scale_change,
+            textvariable=self.preview_zoom_var,
+            values=[str(value) for value in PREVIEW_ZOOM_OPTIONS],
+            state="readonly",
+            width=12,
         )
-        zoom_scale.grid(row=0, column=1, sticky="ew", padx=(10, 10))
-        self.zoom_value_label = ttk.Label(zoom_row, text="%22")
-        self.zoom_value_label.grid(row=0, column=2, sticky="e")
+        self.zoom_combo.grid(row=0, column=1, sticky="w", padx=(10, 10))
+        self.zoom_combo.bind("<<ComboboxSelected>>", self._on_preview_scale_change)
+        ttk.Label(zoom_row, text="%").grid(row=0, column=2, sticky="w")
 
         self.preview_canvas = tk.Canvas(self.preview_frame, highlightthickness=0)
         preview_scrollbar = ttk.Scrollbar(self.preview_frame, orient="vertical", command=self.preview_canvas.yview)
@@ -215,36 +229,13 @@ class PdfMergeApp:
         self.preview_canvas.grid(row=1, column=0, sticky="nsew")
         preview_scrollbar.grid(row=1, column=1, sticky="ns")
 
-        self.preview_content = ttk.Frame(self.preview_canvas)
-        self.preview_canvas_window = self.preview_canvas.create_window((0, 0), window=self.preview_content, anchor="nw")
-        self.preview_content.bind("<Configure>", self._on_preview_content_configure)
         self.preview_canvas.bind("<Configure>", self._on_preview_canvas_configure)
 
         self.preview_canvas.bind("<Enter>", self._set_preview_mouse_inside)
         self.preview_canvas.bind("<Leave>", self._set_preview_mouse_outside)
-        self.preview_content.bind("<Enter>", self._set_preview_mouse_inside)
-        self.preview_content.bind("<Leave>", self._set_preview_mouse_outside)
         self.root.bind_all("<MouseWheel>", self._on_preview_mousewheel, add="+")
         self.root.bind_all("<Button-4>", self._on_preview_mousewheel, add="+")
         self.root.bind_all("<Button-5>", self._on_preview_mousewheel, add="+")
-
-        self.signature_preview_container = ttk.LabelFrame(
-            self.preview_content,
-            text="İmza PDF - Tüm Sayfalar",
-            padding=8,
-        )
-        self.signature_preview_container.grid(row=0, column=0, sticky="nsew")
-
-        self.report_preview_container = ttk.LabelFrame(
-            self.preview_content,
-            text="Rapor PDF - 1. Sayfa Hariç Tüm Sayfalar",
-            padding=8,
-        )
-        self.report_preview_container.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
-
-        self.preview_content.columnconfigure(0, weight=1)
-        self.signature_preview_container.columnconfigure(0, weight=1)
-        self.report_preview_container.columnconfigure(0, weight=1)
 
         self.merge_frame = ttk.LabelFrame(
             self.content_area,
@@ -309,11 +300,16 @@ class PdfMergeApp:
         else:
             self.merge_frame.grid(row=0, column=0, sticky="nsew")
 
-    def _on_preview_content_configure(self, _: tk.Event) -> None:
-        self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox("all"))
-
     def _on_preview_canvas_configure(self, event: tk.Event) -> None:
-        self.preview_canvas.itemconfigure(self.preview_canvas_window, width=event.width)
+        bbox = self.preview_canvas.bbox("all")
+        if bbox is None:
+            self.preview_canvas.configure(scrollregion=(0, 0, event.width, event.height))
+            return
+
+        _, _, content_width, content_height = bbox
+        self.preview_canvas.configure(
+            scrollregion=(0, 0, max(content_width, event.width), max(content_height, event.height))
+        )
 
     def _set_preview_mouse_inside(self, _: tk.Event) -> None:
         self._preview_mouse_inside = True
@@ -335,11 +331,18 @@ class PdfMergeApp:
         elif event_num == 5:
             self.preview_canvas.yview_scroll(1, "units")
 
-    def _on_preview_scale_change(self, _: str) -> None:
-        zoom_percent = int(self.preview_zoom_var.get() * 100)
-        self.zoom_value_label.config(text=f"%{zoom_percent}")
+    def _on_preview_scale_change(self, _: tk.Event | str | None = None) -> None:
         self._update_signature_preview()
         self._update_report_preview()
+
+    def _get_preview_zoom(self) -> float:
+        try:
+            zoom_percent = int(self.preview_zoom_var.get())
+        except (TypeError, ValueError):
+            zoom_percent = 200
+            self.preview_zoom_var.set(str(zoom_percent))
+
+        return max(10, zoom_percent) / 100
 
     def _select_signature_pdf(self) -> None:
         path = filedialog.askopenfilename(
@@ -374,28 +377,10 @@ class PdfMergeApp:
         self._update_report_preview()
 
     def _update_signature_preview(self) -> None:
-        self._render_pdf_preview(
-            pdf_path=self.signature_pdf,
-            rotation=self.signature_rotation,
-            container=self.signature_preview_container,
-            preview_images_attr="signature_preview_images",
-            empty_text="İmza PDF seçildiğinde tüm sayfaların önizlemesi burada görünecek.",
-            start_page=0,
-        )
+        self._render_preview_canvas()
 
     def _update_report_preview(self) -> None:
-        self._render_pdf_preview(
-            pdf_path=self.report_pdf,
-            rotation=self.report_rotation,
-            container=self.report_preview_container,
-            preview_images_attr="report_preview_images",
-            empty_text="Rapor PDF seçildiğinde (1. sayfa hariç) tüm sayfaların önizlemesi burada görünecek.",
-            start_page=1,
-        )
-
-    def _clear_preview_container(self, container: ttk.LabelFrame) -> None:
-        for widget in container.winfo_children():
-            widget.destroy()
+        self._render_preview_canvas()
 
     def _normalized_preview_zoom(self, page: Any, rotation: int, base_zoom: float) -> float:
         target_page_width = 595.0  # A4 portrait width in points (~8.27in * 72)
@@ -408,46 +393,57 @@ class PdfMergeApp:
             return base_zoom
 
         normalized_zoom = base_zoom * (target_page_width / source_width)
-        return max(0.04, min(normalized_zoom, 1.2))
+        return max(0.04, min(normalized_zoom, 3.0))
 
     def _render_pdf_preview(
         self,
         pdf_path: Path | None,
         rotation: int,
-        container: ttk.LabelFrame,
-        preview_images_attr: str,
+        section_title: str,
         empty_text: str,
         start_page: int,
-    ) -> None:
-        self._clear_preview_container(container)
-        setattr(self, preview_images_attr, [])
+        start_y: int,
+    ) -> int:
+        content_x = 12
+        current_y = start_y
+        section_bottom = start_y
+
+        self.preview_canvas.create_text(
+            content_x,
+            current_y,
+            text=section_title,
+            anchor="nw",
+            font=("Segoe UI", 10, "bold"),
+        )
+        current_y += 28
 
         if pdf_path is None:
-            ttk.Label(container, text=empty_text, justify="left").grid(row=0, column=0, sticky="w")
-            return
+            self.preview_canvas.create_text(content_x, current_y, text=empty_text, anchor="nw")
+            return current_y + 30
 
         if not PREVIEW_AVAILABLE:
-            ttk.Label(
-                container,
+            self.preview_canvas.create_text(
+                content_x,
+                current_y,
                 text=f"{pdf_path.name}\n\nÖnizleme için: pip install pymupdf",
-                justify="left",
-            ).grid(row=0, column=0, sticky="w")
-            return
+                anchor="nw",
+            )
+            return current_y + 30
 
         try:
             doc = fitz.open(str(pdf_path))
             total_pages = len(doc)
             if total_pages <= start_page:
-                ttk.Label(container, text=f"{pdf_path.name} için önizlenecek sayfa yok.", justify="left").grid(
-                    row=0,
-                    column=0,
-                    sticky="w",
+                self.preview_canvas.create_text(
+                    content_x,
+                    current_y,
+                    text=f"{pdf_path.name} için önizlenecek sayfa yok.",
+                    anchor="nw",
                 )
                 doc.close()
-                return
+                return current_y + 30
 
-            images: list[tk.PhotoImage] = []
-            base_zoom = float(self.preview_zoom_var.get())
+            base_zoom = self._get_preview_zoom()
 
             for page_index in range(start_page, total_pages):
                 page = doc[page_index]
@@ -455,27 +451,61 @@ class PdfMergeApp:
                 matrix = fitz.Matrix(effective_zoom, effective_zoom).prerotate(rotation)
                 pix = page.get_pixmap(matrix=matrix, alpha=False)
                 photo = tk.PhotoImage(data=pix.tobytes("ppm"))
-                images.append(photo)
+                self.preview_images.append(photo)
 
-                row_index = (page_index - start_page) * 2
-                ttk.Label(container, text=f"Sayfa {page_index + 1}/{total_pages}", font=("Segoe UI", 9, "bold")).grid(
-                    row=row_index,
-                    column=0,
-                    sticky="w",
-                    pady=(6 if page_index > start_page else 0, 2),
+                self.preview_canvas.create_text(
+                    content_x,
+                    current_y,
+                    text=f"Sayfa {page_index + 1}/{total_pages}",
+                    anchor="nw",
+                    font=("Segoe UI", 9, "bold"),
                 )
-                ttk.Label(container, image=photo, relief="solid").grid(
-                    row=row_index + 1,
-                    column=0,
-                    sticky="w",
-                    pady=(0, 6),
-                )
+
+                current_y += 22
+                self.preview_canvas.create_image(content_x, current_y, image=photo, anchor="nw")
+                current_y += pix.height + 12
+                section_bottom = max(section_bottom, current_y)
 
             doc.close()
-            setattr(self, preview_images_attr, images)
-            self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox("all"))
+            return section_bottom
         except Exception as exc:  # pragma: no cover
-            ttk.Label(container, text=f"Önizleme yüklenemedi:\n{exc}", justify="left").grid(row=0, column=0, sticky="w")
+            self.preview_canvas.create_text(
+                content_x,
+                current_y,
+                text=f"Önizleme yüklenemedi:\n{exc}",
+                anchor="nw",
+                justify="left",
+            )
+            return current_y + 30
+
+    def _render_preview_canvas(self) -> None:
+        self.preview_canvas.delete("all")
+        self.preview_images = []
+
+        y = self._render_pdf_preview(
+            pdf_path=self.signature_pdf,
+            rotation=self.signature_rotation,
+            section_title="İmza PDF - Tüm Sayfalar",
+            empty_text="İmza PDF seçildiğinde tüm sayfaların önizlemesi burada görünecek.",
+            start_page=0,
+            start_y=12,
+        )
+
+        y += 22
+        y = self._render_pdf_preview(
+            pdf_path=self.report_pdf,
+            rotation=self.report_rotation,
+            section_title="Rapor PDF - 1. Sayfa Hariç Tüm Sayfalar",
+            empty_text="Rapor PDF seçildiğinde (1. sayfa hariç) tüm sayfaların önizlemesi burada görünecek.",
+            start_page=1,
+            start_y=y,
+        )
+
+        canvas_width = self.preview_canvas.winfo_width()
+        canvas_height = self.preview_canvas.winfo_height()
+        self.preview_canvas.configure(
+            scrollregion=(0, 0, max(canvas_width, 900), max(y + 20, canvas_height))
+        )
 
     def _add_merge_pdfs(self) -> None:
         paths = filedialog.askopenfilenames(
