@@ -191,7 +191,7 @@ class PdfMergeApp:
         zoom_row.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         zoom_row.columnconfigure(1, weight=1)
 
-        ttk.Label(zoom_row, text="Önizleme Ölçeği").grid(row=0, column=0, sticky="w")
+        ttk.Label(zoom_row, text="Önizleme Ölçeği (Otomatik dengeli)").grid(row=0, column=0, sticky="w")
         zoom_scale = ttk.Scale(
             zoom_row,
             from_=0.12,
@@ -400,6 +400,19 @@ class PdfMergeApp:
         for widget in container.winfo_children():
             widget.destroy()
 
+    def _normalized_preview_zoom(self, page: Any, rotation: int, base_zoom: float) -> float:
+        target_page_width = 595.0  # A4 portrait width in points (~8.27in * 72)
+        if rotation % 180 == 90:
+            source_width = float(page.rect.height)
+        else:
+            source_width = float(page.rect.width)
+
+        if source_width <= 0:
+            return base_zoom
+
+        normalized_zoom = base_zoom * (target_page_width / source_width)
+        return max(0.04, min(normalized_zoom, 1.2))
+
     def _render_pdf_preview(
         self,
         pdf_path: Path | None,
@@ -437,11 +450,12 @@ class PdfMergeApp:
                 return
 
             images: list[tk.PhotoImage] = []
-            zoom = float(self.preview_zoom_var.get())
+            base_zoom = float(self.preview_zoom_var.get())
 
             for page_index in range(start_page, total_pages):
                 page = doc[page_index]
-                matrix = fitz.Matrix(zoom, zoom).prerotate(rotation)
+                effective_zoom = self._normalized_preview_zoom(page, rotation, base_zoom)
+                matrix = fitz.Matrix(effective_zoom, effective_zoom).prerotate(rotation)
                 pix = page.get_pixmap(matrix=matrix, alpha=False)
                 photo = tk.PhotoImage(data=pix.tobytes("ppm"))
                 images.append(photo)
