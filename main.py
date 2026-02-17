@@ -1,19 +1,32 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Any, Protocol
 
-PdfReader = None
-PdfWriter = None
-PDF_BACKEND = None
+
+class PdfWriterProtocol(Protocol):
+    def add_page(self, page: Any) -> None: ...
+
+    def write(self, stream: Any) -> None: ...
+
+
+PdfReader: Any = None
+PdfWriter: Any = None
+PDF_BACKEND: str | None = None
 
 if importlib.util.find_spec("pypdf") is not None:
-    from pypdf import PdfReader, PdfWriter
+    pypdf_module = importlib.import_module("pypdf")
+    PdfReader = pypdf_module.PdfReader
+    PdfWriter = pypdf_module.PdfWriter
     PDF_BACKEND = "pypdf"
 elif importlib.util.find_spec("PyPDF2") is not None:
-    from PyPDF2 import PdfReader, PdfWriter
+    pypdf2_module = importlib.import_module("PyPDF2")
+    PdfReader = pypdf2_module.PdfReader
+    PdfWriter = pypdf2_module.PdfWriter
     PDF_BACKEND = "PyPDF2"
 
 
@@ -312,7 +325,7 @@ class PdfMergeApp:
 
         self._save_writer(writer)
 
-    def _save_writer(self, writer: PdfWriter) -> None:
+    def _save_writer(self, writer: PdfWriterProtocol) -> None:
         save_path = filedialog.asksaveasfilename(
             title="Birleşik PDF dosyasını kaydet",
             defaultextension=".pdf",
