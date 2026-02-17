@@ -343,6 +343,25 @@ class PdfMergeApp:
         else:
             self.merge_frame.grid(row=0, column=0, sticky="nsew")
 
+    def _center_progress_window(self) -> None:
+        if self._progress_window is None or not self._progress_window.winfo_exists():
+            return
+
+        self.root.update_idletasks()
+        self._progress_window.update_idletasks()
+
+        width = 360
+        height = 120
+
+        root_x = self.root.winfo_rootx()
+        root_y = self.root.winfo_rooty()
+        root_w = self.root.winfo_width()
+        root_h = self.root.winfo_height()
+
+        x = root_x + max(0, (root_w - width) // 2)
+        y = root_y + max(0, (root_h - height) // 2)
+        self._progress_window.geometry(f"{width}x{height}+{x}+{y}")
+
     def _show_progress(self, message: str) -> None:
         if self._progress_window is None or not self._progress_window.winfo_exists():
             self._progress_window = tk.Toplevel(self.root)
@@ -353,16 +372,26 @@ class PdfMergeApp:
             container = ttk.Frame(self._progress_window, padding=12)
             container.pack(fill="both", expand=True)
 
-            ttk.Label(container, textvariable=self._progress_message_var, wraplength=280).pack(anchor="w")
-            self._progress_bar = ttk.Progressbar(container, mode="indeterminate", length=280)
-            self._progress_bar.pack(fill="x", pady=(10, 0))
+            ttk.Label(
+                container,
+                text="Lütfen bekleyin...",
+                font=("Segoe UI", 10, "bold"),
+            ).pack(anchor="w")
+            ttk.Label(container, textvariable=self._progress_message_var, wraplength=320).pack(anchor="w", pady=(6, 0))
+            self._progress_bar = ttk.Progressbar(container, mode="indeterminate", length=320)
+            self._progress_bar.pack(fill="x", pady=(12, 0))
 
             self._progress_window.protocol("WM_DELETE_WINDOW", lambda: None)
 
         self._progress_message_var.set(message)
+        self._center_progress_window()
+
         if self._progress_bar is not None:
             self._progress_bar.start(12)
 
+        self._progress_window.deiconify()
+        self._progress_window.lift()
+        self._progress_window.grab_set()
         self.root.config(cursor="watch")
         self.root.update_idletasks()
         self.root.update()
@@ -377,6 +406,7 @@ class PdfMergeApp:
         if self._progress_bar is not None:
             self._progress_bar.stop()
         if self._progress_window is not None and self._progress_window.winfo_exists():
+            self._progress_window.grab_release()
             self._progress_window.destroy()
         self._progress_window = None
         self._progress_bar = None
