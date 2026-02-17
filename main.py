@@ -5,16 +5,16 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+PdfReader = None
+PdfWriter = None
+PDF_BACKEND = None
+
 if importlib.util.find_spec("pypdf") is not None:
     from pypdf import PdfReader, PdfWriter
     PDF_BACKEND = "pypdf"
 elif importlib.util.find_spec("PyPDF2") is not None:
     from PyPDF2 import PdfReader, PdfWriter
     PDF_BACKEND = "PyPDF2"
-else:
-    PdfReader = None
-    PdfWriter = None
-    PDF_BACKEND = None
 
 
 class PdfMergeApp:
