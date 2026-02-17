@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import subprocess
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -17,6 +19,42 @@ class PdfWriterProtocol(Protocol):
 PdfReader: Any = None
 PdfWriter: Any = None
 PDF_BACKEND: str | None = None
+
+
+def _install_requirements_if_missing() -> None:
+    requirements_path = Path(__file__).with_name("requirements.txt")
+    if not requirements_path.exists():
+        return
+
+    dependency_imports = {
+        "pypdf": "pypdf",
+        "PyPDF2": "PyPDF2",
+        "PyMuPDF": "fitz",
+        "fitz": "fitz",
+    }
+
+    missing = False
+    for raw_line in requirements_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        package_name = line.split("==")[0].split(">=")[0].split("<=")[0].split("~=")[0].strip()
+        import_name = dependency_imports.get(package_name, package_name)
+        if importlib.util.find_spec(import_name) is None:
+            missing = True
+            break
+
+    if not missing:
+        return
+
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(requirements_path)])
+    except Exception as exc:
+        print(f"Bağımlılıklar otomatik kurulamadı: {exc}", file=sys.stderr)
+
+
+_install_requirements_if_missing()
 
 if importlib.util.find_spec("pypdf") is not None:
     pypdf_module = importlib.import_module("pypdf")
