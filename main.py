@@ -29,18 +29,30 @@ elif importlib.util.find_spec("PyPDF2") is not None:
     PdfWriter = pypdf2_module.PdfWriter
     PDF_BACKEND = "PyPDF2"
 
+PREVIEW_AVAILABLE = False
+fitz: Any = None
+if importlib.util.find_spec("fitz") is not None:
+    fitz = importlib.import_module("fitz")
+    PREVIEW_AVAILABLE = True
+
 
 class PdfMergeApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("PDF Birleştirme Aracı")
-        self.root.geometry("760x520")
+        self.root.geometry("980x680")
 
         self.mode_var = tk.StringVar(value="signed")
 
         self.signature_pdf: Path | None = None
         self.report_pdf: Path | None = None
         self.merge_pdfs: list[Path] = []
+
+        self.signature_rotation = 0
+        self.report_rotation = 0
+
+        self.signature_preview_image: tk.PhotoImage | None = None
+        self.report_preview_image: tk.PhotoImage | None = None
 
         self._build_ui()
         self._refresh_mode_frames()
@@ -63,8 +75,10 @@ class PdfMergeApp:
         )
         subtitle.pack(pady=(0, 16))
 
-        backend_text = f"PDF altyapısı: {PDF_BACKEND}" if PDF_BACKEND else "PDF altyapısı: Bulunamadı"
-        backend_label = ttk.Label(self.root, text=backend_text)
+        backend_parts = [f"PDF altyapısı: {PDF_BACKEND}" if PDF_BACKEND else "PDF altyapısı: Bulunamadı"]
+        preview_backend = "aktif" if PREVIEW_AVAILABLE else "kapalı (pip install pymupdf)"
+        backend_parts.append(f"Önizleme: {preview_backend}")
+        backend_label = ttk.Label(self.root, text=" | ".join(backend_parts))
         backend_label.pack(pady=(0, 10))
 
         mode_box = ttk.LabelFrame(self.root, text="Mod Seçimi", padding=12)
@@ -102,15 +116,62 @@ class PdfMergeApp:
         self.signature_label = ttk.Label(self.signed_frame, text="Henüz seçilmedi")
         self.signature_label.grid(row=0, column=1, sticky="w", padx=(8, 0))
 
+        self.signature_rotation_label = ttk.Label(self.signed_frame, text="İmza yönü: 0°")
+        self.signature_rotation_label.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+
+        sig_rotate_box = ttk.Frame(self.signed_frame)
+        sig_rotate_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Button(sig_rotate_box, text="İmza Sola 90°", command=lambda: self._rotate_signature(-90)).pack(side="left")
+        ttk.Button(sig_rotate_box, text="İmza Sağa 90°", command=lambda: self._rotate_signature(90)).pack(
+            side="left", padx=(8, 0)
+        )
+
         report_btn = ttk.Button(
             self.signed_frame,
             text="Rapor PDF Seç",
             command=self._select_report_pdf,
         )
-        report_btn.grid(row=1, column=0, sticky="w", pady=(10, 0))
+        report_btn.grid(row=2, column=0, sticky="w", pady=(10, 0))
 
         self.report_label = ttk.Label(self.signed_frame, text="Henüz seçilmedi")
-        self.report_label.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+        self.report_label.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+
+        self.report_rotation_label = ttk.Label(self.signed_frame, text="Rapor yönü: 0°")
+        self.report_rotation_label.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+
+        report_rotate_box = ttk.Frame(self.signed_frame)
+        report_rotate_box.grid(row=3, column=0, sticky="w", pady=(4, 0))
+        ttk.Button(report_rotate_box, text="Rapor Sola 90°", command=lambda: self._rotate_report(-90)).pack(side="left")
+        ttk.Button(report_rotate_box, text="Rapor Sağa 90°", command=lambda: self._rotate_report(90)).pack(
+            side="left", padx=(8, 0)
+        )
+
+        preview_frame = ttk.LabelFrame(self.signed_frame, text="İlk Sayfa Önizlemeleri", padding=8)
+        preview_frame.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
+        self.signed_frame.columnconfigure(1, weight=1)
+        self.signed_frame.rowconfigure(4, weight=1)
+        preview_frame.columnconfigure(0, weight=1)
+        preview_frame.columnconfigure(1, weight=1)
+
+        self.signature_preview_label = ttk.Label(
+            preview_frame,
+            text="İmza PDF önizlemesi burada görünecek",
+            anchor="center",
+            justify="center",
+            relief="solid",
+            padding=8,
+        )
+        self.signature_preview_label.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        self.report_preview_label = ttk.Label(
+            preview_frame,
+            text="Rapor PDF önizlemesi burada görünecek",
+            anchor="center",
+            justify="center",
+            relief="solid",
+            padding=8,
+        )
+        self.report_preview_label.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
 
         self.merge_frame = ttk.LabelFrame(
             self.root,
@@ -178,7 +239,7 @@ class PdfMergeApp:
         self.merge_frame.pack_forget()
 
         if self.mode_var.get() == "signed":
-            self.signed_frame.pack(fill="x", padx=16, pady=(12, 0))
+            self.signed_frame.pack(fill="both", expand=True, padx=16, pady=(12, 0))
         else:
             self.merge_frame.pack(fill="both", expand=True, padx=16, pady=(12, 0))
 
@@ -191,6 +252,7 @@ class PdfMergeApp:
             return
         self.signature_pdf = Path(path)
         self.signature_label.config(text=self.signature_pdf.name)
+        self._update_signature_preview()
 
     def _select_report_pdf(self) -> None:
         path = filedialog.askopenfilename(
@@ -201,6 +263,53 @@ class PdfMergeApp:
             return
         self.report_pdf = Path(path)
         self.report_label.config(text=self.report_pdf.name)
+        self._update_report_preview()
+
+    def _rotate_signature(self, step: int) -> None:
+        self.signature_rotation = (self.signature_rotation + step) % 360
+        self.signature_rotation_label.config(text=f"İmza yönü: {self.signature_rotation}°")
+        self._update_signature_preview()
+
+    def _rotate_report(self, step: int) -> None:
+        self.report_rotation = (self.report_rotation + step) % 360
+        self.report_rotation_label.config(text=f"Rapor yönü: {self.report_rotation}°")
+        self._update_report_preview()
+
+    def _update_signature_preview(self) -> None:
+        self.signature_preview_image = self._render_preview(self.signature_pdf, self.signature_rotation)
+        if self.signature_preview_image is None:
+            return
+        self.signature_preview_label.config(image=self.signature_preview_image, text="")
+
+    def _update_report_preview(self) -> None:
+        self.report_preview_image = self._render_preview(self.report_pdf, self.report_rotation)
+        if self.report_preview_image is None:
+            return
+        self.report_preview_label.config(image=self.report_preview_image, text="")
+
+    def _render_preview(self, pdf_path: Path | None, rotation: int) -> tk.PhotoImage | None:
+        if pdf_path is None:
+            return None
+
+        if not PREVIEW_AVAILABLE:
+            info = f"{pdf_path.name}\n\nÖnizleme için: pip install pymupdf"
+            target = self.signature_preview_label if pdf_path == self.signature_pdf else self.report_preview_label
+            target.config(text=info, image="")
+            return None
+
+        try:
+            doc = fitz.open(str(pdf_path))
+            page = doc[0]
+            mat = fitz.Matrix(0.35, 0.35).prerotate(rotation)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            ppm_data = pix.tobytes("ppm")
+            image = tk.PhotoImage(data=ppm_data)
+            doc.close()
+            return image
+        except Exception as exc:  # pragma: no cover
+            target = self.signature_preview_label if pdf_path == self.signature_pdf else self.report_preview_label
+            target.config(text=f"Önizleme yüklenemedi:\n{exc}", image="")
+            return None
 
     def _add_merge_pdfs(self) -> None:
         paths = filedialog.askopenfilenames(
@@ -272,6 +381,21 @@ class PdfMergeApp:
         )
         return False
 
+    def _apply_rotation(self, page: Any, rotation: int) -> Any:
+        if rotation == 0:
+            return page
+
+        if hasattr(page, "rotate"):
+            return page.rotate(rotation)
+
+        if rotation > 0 and hasattr(page, "rotate_clockwise"):
+            return page.rotate_clockwise(rotation)
+
+        if rotation < 0 and hasattr(page, "rotate_counter_clockwise"):
+            return page.rotate_counter_clockwise(abs(rotation))
+
+        return page
+
     def _run_signed_mode(self) -> None:
         if self.signature_pdf is None or self.report_pdf is None:
             messagebox.showwarning(
@@ -297,10 +421,10 @@ class PdfMergeApp:
         writer = PdfWriter()
 
         for page in signature_reader.pages:
-            writer.add_page(page)
+            writer.add_page(self._apply_rotation(page, self.signature_rotation))
 
         for page in report_reader.pages[1:]:
-            writer.add_page(page)
+            writer.add_page(self._apply_rotation(page, self.report_rotation))
 
         self._save_writer(writer)
 
