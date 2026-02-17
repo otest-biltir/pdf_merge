@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Dict, Iterable, Sequence, Tuple
+from typing import Iterable, Sequence, Tuple
 
 try:  # pragma: no cover - optional dependency
     import psycopg2
@@ -122,10 +123,30 @@ def get_connection(source: DataSourceConfig):
         conn.close()
 
 
+def _test_no_sort_key(test_no: str) -> tuple[int, int, str]:
+    """Build descending-sort key for test numbers like YYYY/NNN."""
+
+    normalized = str(test_no).strip()
+    match = re.match(r"^(\d{4})\D+(\d+)$", normalized)
+    if match:
+        return (int(match.group(1)), int(match.group(2)), normalized)
+
+    numbers = re.findall(r"\d+", normalized)
+    if len(numbers) >= 2:
+        return (int(numbers[0]), int(numbers[1]), normalized)
+    if len(numbers) == 1:
+        return (int(numbers[0]), 0, normalized)
+    return (0, 0, normalized)
+
+
+def sort_test_numbers_desc(test_numbers: list[str]) -> list[str]:
+    return sorted(test_numbers, key=_test_no_sort_key, reverse=True)
+
+
 def fetch_test_numbers(source_name: str) -> list[str]:
     source, table = _find_source_and_table(source_name)
 
-    query = f"SELECT test_no FROM {table.table} ORDER BY test_no"
+    query = f"SELECT test_no FROM {table.table}"
     with get_connection(source) as conn:
         with conn.cursor() as cur:
             cur.execute(query)
@@ -136,7 +157,7 @@ def fetch_test_numbers(source_name: str) -> list[str]:
         value = row["test_no"] if isinstance(row, dict) else row[0]
         if value is not None:
             test_numbers.append(str(value))
-    return test_numbers
+    return sort_test_numbers_desc(test_numbers)
 
 
 def get_main_path_for_test(test_no: str, source_name: str) -> str:
