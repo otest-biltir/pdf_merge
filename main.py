@@ -68,6 +68,9 @@ if importlib.util.find_spec("fitz") is not None:
     PREVIEW_AVAILABLE = True
 
 
+PREVIEW_ZOOM_OPTIONS = [100, 110, 125, 150, 175, 200, 250, 300]
+
+
 class PdfMergeApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -85,7 +88,7 @@ class PdfMergeApp:
 
         self.signature_preview_images: list[tk.PhotoImage] = []
         self.report_preview_images: list[tk.PhotoImage] = []
-        self.preview_zoom_var = tk.DoubleVar(value=0.22)
+        self.preview_zoom_var = tk.StringVar(value="200")
         self._preview_mouse_inside = False
 
         self._build_ui()
@@ -195,18 +198,17 @@ class PdfMergeApp:
         zoom_row.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         zoom_row.columnconfigure(1, weight=1)
 
-        ttk.Label(zoom_row, text="Önizleme Ölçeği (Otomatik dengeli)").grid(row=0, column=0, sticky="w")
-        zoom_scale = ttk.Scale(
+        ttk.Label(zoom_row, text="Önizleme Ölçeği").grid(row=0, column=0, sticky="w")
+        self.zoom_combo = ttk.Combobox(
             zoom_row,
-            from_=0.12,
-            to=0.85,
-            orient="horizontal",
-            variable=self.preview_zoom_var,
-            command=self._on_preview_scale_change,
+            textvariable=self.preview_zoom_var,
+            values=[str(value) for value in PREVIEW_ZOOM_OPTIONS],
+            state="readonly",
+            width=12,
         )
-        zoom_scale.grid(row=0, column=1, sticky="ew", padx=(10, 10))
-        self.zoom_value_label = ttk.Label(zoom_row, text="%22")
-        self.zoom_value_label.grid(row=0, column=2, sticky="e")
+        self.zoom_combo.grid(row=0, column=1, sticky="w", padx=(10, 10))
+        self.zoom_combo.bind("<<ComboboxSelected>>", self._on_preview_scale_change)
+        ttk.Label(zoom_row, text="%").grid(row=0, column=2, sticky="w")
 
         self.preview_canvas = tk.Canvas(self.preview_frame, highlightthickness=0)
         preview_scrollbar = ttk.Scrollbar(self.preview_frame, orient="vertical", command=self.preview_canvas.yview)
@@ -335,11 +337,18 @@ class PdfMergeApp:
         elif event_num == 5:
             self.preview_canvas.yview_scroll(1, "units")
 
-    def _on_preview_scale_change(self, _: str) -> None:
-        zoom_percent = int(self.preview_zoom_var.get() * 100)
-        self.zoom_value_label.config(text=f"%{zoom_percent}")
+    def _on_preview_scale_change(self, _: tk.Event | str | None = None) -> None:
         self._update_signature_preview()
         self._update_report_preview()
+
+    def _get_preview_zoom(self) -> float:
+        try:
+            zoom_percent = int(self.preview_zoom_var.get())
+        except (TypeError, ValueError):
+            zoom_percent = 200
+            self.preview_zoom_var.set(str(zoom_percent))
+
+        return max(10, zoom_percent) / 100
 
     def _select_signature_pdf(self) -> None:
         path = filedialog.askopenfilename(
@@ -408,7 +417,7 @@ class PdfMergeApp:
             return base_zoom
 
         normalized_zoom = base_zoom * (target_page_width / source_width)
-        return max(0.04, min(normalized_zoom, 1.2))
+        return max(0.04, min(normalized_zoom, 3.0))
 
     def _render_pdf_preview(
         self,
@@ -447,7 +456,7 @@ class PdfMergeApp:
                 return
 
             images: list[tk.PhotoImage] = []
-            base_zoom = float(self.preview_zoom_var.get())
+            base_zoom = self._get_preview_zoom()
 
             for page_index in range(start_page, total_pages):
                 page = doc[page_index]
