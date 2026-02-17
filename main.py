@@ -543,7 +543,11 @@ def main() -> None:
     style = ttk.Style(root)
     style.theme_use("clam")
     PdfMergeApp(root)
-    root.mainloop()
+
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        root.destroy()
 
 
 if __name__ == "__main__":
