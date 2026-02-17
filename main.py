@@ -1,33 +1,92 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
+import subprocess
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Any, Protocol
+
+
+class PdfWriterProtocol(Protocol):
+    def add_page(self, page: Any) -> None: ...
+
+    def write(self, stream: Any) -> None: ...
+
+
+PdfReader: Any = None
+PdfWriter: Any = None
+PDF_BACKEND: str | None = None
+
+
+def _install_requirements_if_missing() -> None:
+    requirements_path = Path(__file__).with_name("requirements.txt")
+    if not requirements_path.exists():
+        return
+
+    dependency_imports = {
+        "pypdf": "pypdf",
+        "PyMuPDF": "fitz",
+        "fitz": "fitz",
+    }
+
+    missing = False
+    for raw_line in requirements_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        package_name = line.split("==")[0].split(">=")[0].split("<=")[0].split("~=")[0].strip()
+        import_name = dependency_imports.get(package_name, package_name)
+        if importlib.util.find_spec(import_name) is None:
+            missing = True
+            break
+
+    if not missing:
+        return
+
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(requirements_path)])
+    except Exception as exc:
+        print(f"Bağımlılıklar otomatik kurulamadı: {exc}", file=sys.stderr)
+
+
+_install_requirements_if_missing()
 
 if importlib.util.find_spec("pypdf") is not None:
-    from pypdf import PdfReader, PdfWriter
+    pypdf_module = importlib.import_module("pypdf")
+    PdfReader = pypdf_module.PdfReader
+    PdfWriter = pypdf_module.PdfWriter
     PDF_BACKEND = "pypdf"
-elif importlib.util.find_spec("PyPDF2") is not None:
-    from PyPDF2 import PdfReader, PdfWriter
-    PDF_BACKEND = "PyPDF2"
-else:
-    PdfReader = None
-    PdfWriter = None
-    PDF_BACKEND = None
+
+PREVIEW_AVAILABLE = False
+fitz: Any = None
+if importlib.util.find_spec("fitz") is not None:
+    fitz = importlib.import_module("fitz")
+    PREVIEW_AVAILABLE = True
 
 
 class PdfMergeApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("PDF Birleştirme Aracı")
-        self.root.geometry("760x520")
+        self.root.geometry("980x680")
 
         self.mode_var = tk.StringVar(value="signed")
 
         self.signature_pdf: Path | None = None
         self.report_pdf: Path | None = None
         self.merge_pdfs: list[Path] = []
+
+        self.signature_rotation = 0
+        self.report_rotation = 0
+
+        self.signature_preview_images: list[tk.PhotoImage] = []
+        self.report_preview_images: list[tk.PhotoImage] = []
+        self.preview_zoom_var = tk.DoubleVar(value=0.22)
+        self._preview_mouse_inside = False
 
         self._build_ui()
         self._refresh_mode_frames()
@@ -38,24 +97,30 @@ class PdfMergeApp:
             text="PDF Birleştirme Uygulaması",
             font=("Segoe UI", 16, "bold"),
         )
-        title.pack(pady=(18, 6))
+        title.pack(pady=(14, 6))
 
-        subtitle = ttk.Label(
-            self.root,
-            text=(
-                "İki mod desteklenir: İmzalı PDF birleştirme ve standart PDF birleştirme.\n"
-                "Not: Sayfalar doğrudan kopyalandığı için çözünürlükte kayıp oluşturulmaz."
-            ),
-            justify="center",
-        )
-        subtitle.pack(pady=(0, 16))
+        backend_parts = [f"PDF altyapısı: {PDF_BACKEND}" if PDF_BACKEND else "PDF altyapısı: Bulunamadı"]
+        preview_backend = "aktif" if PREVIEW_AVAILABLE else "kapalı (pip install pymupdf)"
+        backend_parts.append(f"Önizleme: {preview_backend}")
+        backend_label = ttk.Label(self.root, text=" | ".join(backend_parts))
+        backend_label.pack(pady=(0, 8))
 
-        backend_text = f"PDF altyapısı: {PDF_BACKEND}" if PDF_BACKEND else "PDF altyapısı: Bulunamadı"
-        backend_label = ttk.Label(self.root, text=backend_text)
-        backend_label.pack(pady=(0, 10))
+        self.main_layout = ttk.Frame(self.root)
+        self.main_layout.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.main_layout.columnconfigure(1, weight=1)
+        self.main_layout.rowconfigure(0, weight=1)
 
-        mode_box = ttk.LabelFrame(self.root, text="Mod Seçimi", padding=12)
-        mode_box.pack(fill="x", padx=16)
+        self.sidebar = ttk.Frame(self.main_layout, width=270)
+        self.sidebar.grid(row=0, column=0, sticky="nsw")
+        self.sidebar.grid_propagate(False)
+
+        self.content_area = ttk.Frame(self.main_layout)
+        self.content_area.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        self.content_area.columnconfigure(0, weight=1)
+        self.content_area.rowconfigure(0, weight=1)
+
+        mode_box = ttk.LabelFrame(self.sidebar, text="Mod Seçimi", padding=8)
+        mode_box.pack(fill="x")
 
         ttk.Radiobutton(
             mode_box,
@@ -73,34 +138,116 @@ class PdfMergeApp:
             command=self._refresh_mode_frames,
         ).pack(anchor="w", pady=(6, 0))
 
-        self.signed_frame = ttk.LabelFrame(
-            self.root,
-            text="Mod 1 - İmzalanmış PDF'leri Birleştir",
-            padding=12,
+        ttk.Button(
+            self.sidebar,
+            text="Birleştir ve Kaydet",
+            command=self._merge_and_save,
+        ).pack(fill="x", pady=(8, 10))
+
+        self.signed_controls_frame = ttk.LabelFrame(
+            self.sidebar,
+            text="İmzalı Mod Kontrolleri",
+            padding=8,
         )
 
-        sig_btn = ttk.Button(
-            self.signed_frame,
+        ttk.Button(
+            self.signed_controls_frame,
             text="İmza Sayfası PDF Seç",
             command=self._select_signature_pdf,
-        )
-        sig_btn.grid(row=0, column=0, sticky="w")
+        ).grid(row=0, column=0, sticky="ew")
 
-        self.signature_label = ttk.Label(self.signed_frame, text="Henüz seçilmedi")
-        self.signature_label.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        self.signature_label = ttk.Label(self.signed_controls_frame, text="Henüz seçilmedi", wraplength=230)
+        self.signature_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
 
-        report_btn = ttk.Button(
-            self.signed_frame,
+        self.signature_rotation_label = ttk.Label(self.signed_controls_frame, text="İmza yönü: 0°")
+        self.signature_rotation_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
+
+        sig_rotate_box = ttk.Frame(self.signed_controls_frame)
+        sig_rotate_box.grid(row=3, column=0, sticky="ew", pady=(4, 8))
+        ttk.Button(sig_rotate_box, text="Sola 90°", command=lambda: self._rotate_signature(-90)).pack(side="left")
+        ttk.Button(sig_rotate_box, text="Sağa 90°", command=lambda: self._rotate_signature(90)).pack(side="left", padx=(6, 0))
+
+        ttk.Button(
+            self.signed_controls_frame,
             text="Rapor PDF Seç",
             command=self._select_report_pdf,
-        )
-        report_btn.grid(row=1, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=4, column=0, sticky="ew")
 
-        self.report_label = ttk.Label(self.signed_frame, text="Henüz seçilmedi")
-        self.report_label.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+        self.report_label = ttk.Label(self.signed_controls_frame, text="Henüz seçilmedi", wraplength=230)
+        self.report_label.grid(row=5, column=0, sticky="w", pady=(4, 0))
+
+        self.report_rotation_label = ttk.Label(self.signed_controls_frame, text="Rapor yönü: 0°")
+        self.report_rotation_label.grid(row=6, column=0, sticky="w", pady=(4, 0))
+
+        report_rotate_box = ttk.Frame(self.signed_controls_frame)
+        report_rotate_box.grid(row=7, column=0, sticky="ew", pady=(4, 0))
+        ttk.Button(report_rotate_box, text="Sola 90°", command=lambda: self._rotate_report(-90)).pack(side="left")
+        ttk.Button(report_rotate_box, text="Sağa 90°", command=lambda: self._rotate_report(90)).pack(side="left", padx=(6, 0))
+
+        self.signed_controls_frame.columnconfigure(0, weight=1)
+
+        self.preview_frame = ttk.LabelFrame(self.content_area, text="PDF Önizlemeleri", padding=8)
+        self.preview_frame.grid(row=0, column=0, sticky="nsew")
+        self.preview_frame.columnconfigure(0, weight=1)
+        self.preview_frame.rowconfigure(1, weight=1)
+
+        zoom_row = ttk.Frame(self.preview_frame)
+        zoom_row.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        zoom_row.columnconfigure(1, weight=1)
+
+        ttk.Label(zoom_row, text="Önizleme Ölçeği (Otomatik dengeli)").grid(row=0, column=0, sticky="w")
+        zoom_scale = ttk.Scale(
+            zoom_row,
+            from_=0.12,
+            to=0.85,
+            orient="horizontal",
+            variable=self.preview_zoom_var,
+            command=self._on_preview_scale_change,
+        )
+        zoom_scale.grid(row=0, column=1, sticky="ew", padx=(10, 10))
+        self.zoom_value_label = ttk.Label(zoom_row, text="%22")
+        self.zoom_value_label.grid(row=0, column=2, sticky="e")
+
+        self.preview_canvas = tk.Canvas(self.preview_frame, highlightthickness=0)
+        preview_scrollbar = ttk.Scrollbar(self.preview_frame, orient="vertical", command=self.preview_canvas.yview)
+        self.preview_canvas.configure(yscrollcommand=preview_scrollbar.set)
+
+        self.preview_canvas.grid(row=1, column=0, sticky="nsew")
+        preview_scrollbar.grid(row=1, column=1, sticky="ns")
+
+        self.preview_content = ttk.Frame(self.preview_canvas)
+        self.preview_canvas_window = self.preview_canvas.create_window((0, 0), window=self.preview_content, anchor="nw")
+        self.preview_content.bind("<Configure>", self._on_preview_content_configure)
+        self.preview_canvas.bind("<Configure>", self._on_preview_canvas_configure)
+
+        self.preview_canvas.bind("<Enter>", self._set_preview_mouse_inside)
+        self.preview_canvas.bind("<Leave>", self._set_preview_mouse_outside)
+        self.preview_content.bind("<Enter>", self._set_preview_mouse_inside)
+        self.preview_content.bind("<Leave>", self._set_preview_mouse_outside)
+        self.root.bind_all("<MouseWheel>", self._on_preview_mousewheel, add="+")
+        self.root.bind_all("<Button-4>", self._on_preview_mousewheel, add="+")
+        self.root.bind_all("<Button-5>", self._on_preview_mousewheel, add="+")
+
+        self.signature_preview_container = ttk.LabelFrame(
+            self.preview_content,
+            text="İmza PDF - Tüm Sayfalar",
+            padding=8,
+        )
+        self.signature_preview_container.grid(row=0, column=0, sticky="nsew")
+
+        self.report_preview_container = ttk.LabelFrame(
+            self.preview_content,
+            text="Rapor PDF - 1. Sayfa Hariç Tüm Sayfalar",
+            padding=8,
+        )
+        self.report_preview_container.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+
+        self.preview_content.columnconfigure(0, weight=1)
+        self.signature_preview_container.columnconfigure(0, weight=1)
+        self.report_preview_container.columnconfigure(0, weight=1)
 
         self.merge_frame = ttk.LabelFrame(
-            self.root,
+            self.content_area,
             text="Mod 2 - PDF'leri Birleştir",
             padding=12,
         )
@@ -151,23 +298,48 @@ class PdfMergeApp:
             command=self._remove_selected,
         ).pack(side="left", padx=(8, 0))
 
-        action_row = ttk.Frame(self.root)
-        action_row.pack(fill="x", padx=16, pady=16)
-
-        ttk.Button(
-            action_row,
-            text="Birleştir ve Kaydet",
-            command=self._merge_and_save,
-        ).pack(side="right")
-
     def _refresh_mode_frames(self) -> None:
-        self.signed_frame.pack_forget()
-        self.merge_frame.pack_forget()
+        self.signed_controls_frame.pack_forget()
+        self.preview_frame.grid_remove()
+        self.merge_frame.grid_remove()
 
         if self.mode_var.get() == "signed":
-            self.signed_frame.pack(fill="x", padx=16, pady=(12, 0))
+            self.signed_controls_frame.pack(fill="x")
+            self.preview_frame.grid(row=0, column=0, sticky="nsew")
         else:
-            self.merge_frame.pack(fill="both", expand=True, padx=16, pady=(12, 0))
+            self.merge_frame.grid(row=0, column=0, sticky="nsew")
+
+    def _on_preview_content_configure(self, _: tk.Event) -> None:
+        self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox("all"))
+
+    def _on_preview_canvas_configure(self, event: tk.Event) -> None:
+        self.preview_canvas.itemconfigure(self.preview_canvas_window, width=event.width)
+
+    def _set_preview_mouse_inside(self, _: tk.Event) -> None:
+        self._preview_mouse_inside = True
+
+    def _set_preview_mouse_outside(self, _: tk.Event) -> None:
+        self._preview_mouse_inside = False
+
+    def _on_preview_mousewheel(self, event: tk.Event) -> None:
+        if not self._preview_mouse_inside:
+            return
+
+        if hasattr(event, "delta") and event.delta:
+            self.preview_canvas.yview_scroll(int(-event.delta / 120), "units")
+            return
+
+        event_num = getattr(event, "num", None)
+        if event_num == 4:
+            self.preview_canvas.yview_scroll(-1, "units")
+        elif event_num == 5:
+            self.preview_canvas.yview_scroll(1, "units")
+
+    def _on_preview_scale_change(self, _: str) -> None:
+        zoom_percent = int(self.preview_zoom_var.get() * 100)
+        self.zoom_value_label.config(text=f"%{zoom_percent}")
+        self._update_signature_preview()
+        self._update_report_preview()
 
     def _select_signature_pdf(self) -> None:
         path = filedialog.askopenfilename(
@@ -178,6 +350,7 @@ class PdfMergeApp:
             return
         self.signature_pdf = Path(path)
         self.signature_label.config(text=self.signature_pdf.name)
+        self._update_signature_preview()
 
     def _select_report_pdf(self) -> None:
         path = filedialog.askopenfilename(
@@ -188,6 +361,121 @@ class PdfMergeApp:
             return
         self.report_pdf = Path(path)
         self.report_label.config(text=self.report_pdf.name)
+        self._update_report_preview()
+
+    def _rotate_signature(self, step: int) -> None:
+        self.signature_rotation = (self.signature_rotation + step) % 360
+        self.signature_rotation_label.config(text=f"İmza yönü: {self.signature_rotation}°")
+        self._update_signature_preview()
+
+    def _rotate_report(self, step: int) -> None:
+        self.report_rotation = (self.report_rotation + step) % 360
+        self.report_rotation_label.config(text=f"Rapor yönü: {self.report_rotation}°")
+        self._update_report_preview()
+
+    def _update_signature_preview(self) -> None:
+        self._render_pdf_preview(
+            pdf_path=self.signature_pdf,
+            rotation=self.signature_rotation,
+            container=self.signature_preview_container,
+            preview_images_attr="signature_preview_images",
+            empty_text="İmza PDF seçildiğinde tüm sayfaların önizlemesi burada görünecek.",
+            start_page=0,
+        )
+
+    def _update_report_preview(self) -> None:
+        self._render_pdf_preview(
+            pdf_path=self.report_pdf,
+            rotation=self.report_rotation,
+            container=self.report_preview_container,
+            preview_images_attr="report_preview_images",
+            empty_text="Rapor PDF seçildiğinde (1. sayfa hariç) tüm sayfaların önizlemesi burada görünecek.",
+            start_page=1,
+        )
+
+    def _clear_preview_container(self, container: ttk.LabelFrame) -> None:
+        for widget in container.winfo_children():
+            widget.destroy()
+
+    def _normalized_preview_zoom(self, page: Any, rotation: int, base_zoom: float) -> float:
+        target_page_width = 595.0  # A4 portrait width in points (~8.27in * 72)
+        if rotation % 180 == 90:
+            source_width = float(page.rect.height)
+        else:
+            source_width = float(page.rect.width)
+
+        if source_width <= 0:
+            return base_zoom
+
+        normalized_zoom = base_zoom * (target_page_width / source_width)
+        return max(0.04, min(normalized_zoom, 1.2))
+
+    def _render_pdf_preview(
+        self,
+        pdf_path: Path | None,
+        rotation: int,
+        container: ttk.LabelFrame,
+        preview_images_attr: str,
+        empty_text: str,
+        start_page: int,
+    ) -> None:
+        self._clear_preview_container(container)
+        setattr(self, preview_images_attr, [])
+
+        if pdf_path is None:
+            ttk.Label(container, text=empty_text, justify="left").grid(row=0, column=0, sticky="w")
+            return
+
+        if not PREVIEW_AVAILABLE:
+            ttk.Label(
+                container,
+                text=f"{pdf_path.name}\n\nÖnizleme için: pip install pymupdf",
+                justify="left",
+            ).grid(row=0, column=0, sticky="w")
+            return
+
+        try:
+            doc = fitz.open(str(pdf_path))
+            total_pages = len(doc)
+            if total_pages <= start_page:
+                ttk.Label(container, text=f"{pdf_path.name} için önizlenecek sayfa yok.", justify="left").grid(
+                    row=0,
+                    column=0,
+                    sticky="w",
+                )
+                doc.close()
+                return
+
+            images: list[tk.PhotoImage] = []
+            base_zoom = float(self.preview_zoom_var.get())
+
+            for page_index in range(start_page, total_pages):
+                page = doc[page_index]
+                effective_zoom = self._normalized_preview_zoom(page, rotation, base_zoom)
+                matrix = fitz.Matrix(effective_zoom, effective_zoom).prerotate(rotation)
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+                photo = tk.PhotoImage(data=pix.tobytes("ppm"))
+                images.append(photo)
+
+                row_index = (page_index - start_page) * 2
+                ttk.Label(container, text=f"Sayfa {page_index + 1}/{total_pages}", font=("Segoe UI", 9, "bold")).grid(
+                    row=row_index,
+                    column=0,
+                    sticky="w",
+                    pady=(6 if page_index > start_page else 0, 2),
+                )
+                ttk.Label(container, image=photo, relief="solid").grid(
+                    row=row_index + 1,
+                    column=0,
+                    sticky="w",
+                    pady=(0, 6),
+                )
+
+            doc.close()
+            setattr(self, preview_images_attr, images)
+            self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox("all"))
+        except Exception as exc:  # pragma: no cover
+            ttk.Label(container, text=f"Önizleme yüklenemedi:\n{exc}", justify="left").grid(row=0, column=0, sticky="w")
 
     def _add_merge_pdfs(self) -> None:
         paths = filedialog.askopenfilenames(
@@ -259,6 +547,21 @@ class PdfMergeApp:
         )
         return False
 
+    def _apply_rotation(self, page: Any, rotation: int) -> Any:
+        if rotation == 0:
+            return page
+
+        if hasattr(page, "rotate"):
+            return page.rotate(rotation)
+
+        if rotation > 0 and hasattr(page, "rotate_clockwise"):
+            return page.rotate_clockwise(rotation)
+
+        if rotation < 0 and hasattr(page, "rotate_counter_clockwise"):
+            return page.rotate_counter_clockwise(abs(rotation))
+
+        return page
+
     def _run_signed_mode(self) -> None:
         if self.signature_pdf is None or self.report_pdf is None:
             messagebox.showwarning(
@@ -284,10 +587,10 @@ class PdfMergeApp:
         writer = PdfWriter()
 
         for page in signature_reader.pages:
-            writer.add_page(page)
+            writer.add_page(self._apply_rotation(page, self.signature_rotation))
 
         for page in report_reader.pages[1:]:
-            writer.add_page(page)
+            writer.add_page(self._apply_rotation(page, self.report_rotation))
 
         self._save_writer(writer)
 
@@ -312,7 +615,7 @@ class PdfMergeApp:
 
         self._save_writer(writer)
 
-    def _save_writer(self, writer: PdfWriter) -> None:
+    def _save_writer(self, writer: PdfWriterProtocol) -> None:
         save_path = filedialog.asksaveasfilename(
             title="Birleşik PDF dosyasını kaydet",
             defaultextension=".pdf",
@@ -336,7 +639,11 @@ def main() -> None:
     style = ttk.Style(root)
     style.theme_use("clam")
     PdfMergeApp(root)
-    root.mainloop()
+
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        root.destroy()
 
 
 if __name__ == "__main__":
