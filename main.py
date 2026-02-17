@@ -28,7 +28,6 @@ def _install_requirements_if_missing() -> None:
 
     dependency_imports = {
         "pypdf": "pypdf",
-        "PyPDF2": "PyPDF2",
         "PyMuPDF": "fitz",
         "fitz": "fitz",
     }
@@ -61,11 +60,6 @@ if importlib.util.find_spec("pypdf") is not None:
     PdfReader = pypdf_module.PdfReader
     PdfWriter = pypdf_module.PdfWriter
     PDF_BACKEND = "pypdf"
-elif importlib.util.find_spec("PyPDF2") is not None:
-    pypdf2_module = importlib.import_module("PyPDF2")
-    PdfReader = pypdf2_module.PdfReader
-    PdfWriter = pypdf2_module.PdfWriter
-    PDF_BACKEND = "PyPDF2"
 
 PREVIEW_AVAILABLE = False
 fitz: Any = None
