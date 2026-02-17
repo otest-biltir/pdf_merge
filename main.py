@@ -50,6 +50,9 @@ def _install_requirements_if_missing() -> None:
         "pypdf": "pypdf",
         "PyMuPDF": "fitz",
         "fitz": "fitz",
+        "psycopg2-binary": "psycopg2",
+        "psycopg2": "psycopg2",
+        "psycopg": "psycopg",
     }
 
     missing = False

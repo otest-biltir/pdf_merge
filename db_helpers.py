@@ -102,7 +102,8 @@ def _create_connection(*, host: str, port: int, user: str, password: str, databa
         )
 
     raise DatabaseLookupError(
-        "Veritabanına bağlanmak için psycopg2 veya psycopg paketlerinden en az biri gerekli."
+        "Veritabanına bağlanmak için psycopg2 veya psycopg paketlerinden en az biri gerekli. "
+        "Uygulama açılışta requirements.txt kurulumunu dener; başarısız olduysa manuel kurulum yapın."
     )
 
 
