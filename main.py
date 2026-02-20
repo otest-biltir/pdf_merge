@@ -5,9 +5,19 @@ import importlib.util
 import subprocess
 import sys
 import tkinter as tk
+from contextlib import contextmanager
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Protocol
+
+from db_helpers import DatabaseLookupError, fetch_test_numbers, get_main_path_for_test, iter_test_sources
+from report_storage import (
+    ReportFolderResolutionError,
+    build_default_signed_filename,
+    find_existing_signed_pdfs,
+    resolve_report_pdf_folder,
+    resolve_versioned_target_path,
+)
 
 
 class PdfWriterProtocol(Protocol):
@@ -43,6 +53,9 @@ def _install_requirements_if_missing() -> None:
         "pypdf": "pypdf",
         "PyMuPDF": "fitz",
         "fitz": "fitz",
+        "psycopg2-binary": "psycopg2",
+        "psycopg2": "psycopg2",
+        "psycopg": "psycopg",
     }
 
     missing = False
@@ -102,6 +115,13 @@ class PdfMergeApp:
         self.preview_images: list[tk.PhotoImage] = []
         self.preview_zoom_var = tk.StringVar(value="200")
         self._preview_mouse_inside = False
+        self.source_var = tk.StringVar()
+        self.test_var = tk.StringVar()
+        self.signed_filename_preview_var = tk.StringVar(value="<yıl>_<testno>_Report_Signed.pdf")
+
+        self._progress_window: tk.Toplevel | None = None
+        self._progress_message_var = tk.StringVar(value="")
+        self._progress_bar: ttk.Progressbar | None = None
 
         self._build_ui()
         self._refresh_mode_frames()
@@ -153,32 +173,47 @@ class PdfMergeApp:
             command=self._refresh_mode_frames,
         ).pack(anchor="w", pady=(6, 0))
 
-        ttk.Button(
-            self.sidebar,
-            text="Birleştir ve Kaydet",
-            command=self._merge_and_save,
-        ).pack(fill="x", pady=(8, 10))
-
         self.signed_controls_frame = ttk.LabelFrame(
             self.sidebar,
             text="İmzalı Mod Kontrolleri",
             padding=8,
         )
 
+        db_frame = ttk.LabelFrame(self.signed_controls_frame, text="Test Hedefi", padding=8)
+        db_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        db_frame.columnconfigure(0, weight=1)
+
+        ttk.Label(db_frame, text="Kaynak").grid(row=0, column=0, sticky="w")
+        self.source_combo = ttk.Combobox(db_frame, textvariable=self.source_var, state="readonly")
+        self.source_combo.grid(row=1, column=0, sticky="ew", pady=(2, 6))
+        self.source_combo.bind("<<ComboboxSelected>>", self._on_source_selected)
+
+        ttk.Label(db_frame, text="Test No").grid(row=2, column=0, sticky="w")
+        self.test_combo = ttk.Combobox(db_frame, textvariable=self.test_var, state="readonly")
+        self.test_combo.grid(row=3, column=0, sticky="ew", pady=(2, 6))
+        self.test_combo.bind("<<ComboboxSelected>>", self._on_test_selected)
+
+        ttk.Label(db_frame, text="Dosya adı otomatik:").grid(row=4, column=0, sticky="w", pady=(2, 0))
+        ttk.Label(db_frame, textvariable=self.signed_filename_preview_var).grid(row=5, column=0, sticky="w")
+
+        ttk.Button(db_frame, text="Testleri Yenile", command=self._refresh_test_sources).grid(
+            row=6, column=0, sticky="ew", pady=(8, 0)
+        )
+
         ttk.Button(
             self.signed_controls_frame,
             text="İmza Sayfası PDF Seç",
             command=self._select_signature_pdf,
-        ).grid(row=0, column=0, sticky="ew")
+        ).grid(row=1, column=0, sticky="ew")
 
         self.signature_label = ttk.Label(self.signed_controls_frame, text="Henüz seçilmedi", wraplength=230)
-        self.signature_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.signature_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
 
         self.signature_rotation_label = ttk.Label(self.signed_controls_frame, text="İmza yönü: 0°")
-        self.signature_rotation_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
+        self.signature_rotation_label.grid(row=3, column=0, sticky="w", pady=(4, 0))
 
         sig_rotate_box = ttk.Frame(self.signed_controls_frame)
-        sig_rotate_box.grid(row=3, column=0, sticky="ew", pady=(4, 8))
+        sig_rotate_box.grid(row=4, column=0, sticky="ew", pady=(4, 8))
         ttk.Button(sig_rotate_box, text="Sola 90°", command=lambda: self._rotate_signature(-90)).pack(side="left")
         ttk.Button(sig_rotate_box, text="Sağa 90°", command=lambda: self._rotate_signature(90)).pack(side="left", padx=(6, 0))
 
@@ -186,20 +221,28 @@ class PdfMergeApp:
             self.signed_controls_frame,
             text="Rapor PDF Seç",
             command=self._select_report_pdf,
-        ).grid(row=4, column=0, sticky="ew")
+        ).grid(row=5, column=0, sticky="ew")
 
         self.report_label = ttk.Label(self.signed_controls_frame, text="Henüz seçilmedi", wraplength=230)
-        self.report_label.grid(row=5, column=0, sticky="w", pady=(4, 0))
+        self.report_label.grid(row=6, column=0, sticky="w", pady=(4, 0))
 
         self.report_rotation_label = ttk.Label(self.signed_controls_frame, text="Rapor yönü: 0°")
-        self.report_rotation_label.grid(row=6, column=0, sticky="w", pady=(4, 0))
+        self.report_rotation_label.grid(row=7, column=0, sticky="w", pady=(4, 0))
 
         report_rotate_box = ttk.Frame(self.signed_controls_frame)
-        report_rotate_box.grid(row=7, column=0, sticky="ew", pady=(4, 0))
+        report_rotate_box.grid(row=8, column=0, sticky="ew", pady=(4, 0))
         ttk.Button(report_rotate_box, text="Sola 90°", command=lambda: self._rotate_report(-90)).pack(side="left")
         ttk.Button(report_rotate_box, text="Sağa 90°", command=lambda: self._rotate_report(90)).pack(side="left", padx=(6, 0))
 
         self.signed_controls_frame.columnconfigure(0, weight=1)
+
+        self._refresh_test_sources()
+
+        ttk.Button(
+            self.sidebar,
+            text="Birleştir ve Kaydet",
+            command=self._merge_and_save,
+        ).pack(side="bottom", fill="x", pady=(8, 10))
 
         self.preview_frame = ttk.LabelFrame(self.content_area, text="PDF Önizlemeleri", padding=8)
         self.preview_frame.grid(row=0, column=0, sticky="nsew")
@@ -300,6 +343,84 @@ class PdfMergeApp:
         else:
             self.merge_frame.grid(row=0, column=0, sticky="nsew")
 
+    def _center_progress_window(self) -> None:
+        if self._progress_window is None or not self._progress_window.winfo_exists():
+            return
+
+        self.root.update_idletasks()
+        self._progress_window.update_idletasks()
+
+        width = 360
+        height = 120
+
+        root_x = self.root.winfo_rootx()
+        root_y = self.root.winfo_rooty()
+        root_w = self.root.winfo_width()
+        root_h = self.root.winfo_height()
+
+        x = root_x + max(0, (root_w - width) // 2)
+        y = root_y + max(0, (root_h - height) // 2)
+        self._progress_window.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _show_progress(self, message: str) -> None:
+        if self._progress_window is None or not self._progress_window.winfo_exists():
+            self._progress_window = tk.Toplevel(self.root)
+            self._progress_window.title("İşlem devam ediyor")
+            self._progress_window.transient(self.root)
+            self._progress_window.resizable(False, False)
+
+            container = ttk.Frame(self._progress_window, padding=12)
+            container.pack(fill="both", expand=True)
+
+            ttk.Label(
+                container,
+                text="Lütfen bekleyin...",
+                font=("Segoe UI", 10, "bold"),
+            ).pack(anchor="w")
+            ttk.Label(container, textvariable=self._progress_message_var, wraplength=320).pack(anchor="w", pady=(6, 0))
+            self._progress_bar = ttk.Progressbar(container, mode="indeterminate", length=320)
+            self._progress_bar.pack(fill="x", pady=(12, 0))
+
+            self._progress_window.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        self._progress_message_var.set(message)
+        self._center_progress_window()
+
+        if self._progress_bar is not None:
+            self._progress_bar.start(12)
+
+        self._progress_window.deiconify()
+        self._progress_window.lift()
+        self._progress_window.grab_set()
+        self.root.config(cursor="watch")
+        self.root.update_idletasks()
+        self.root.update()
+
+    def _update_progress(self, message: str | None = None) -> None:
+        if message:
+            self._progress_message_var.set(message)
+        self.root.update_idletasks()
+        self.root.update()
+
+    def _hide_progress(self) -> None:
+        if self._progress_bar is not None:
+            self._progress_bar.stop()
+        if self._progress_window is not None and self._progress_window.winfo_exists():
+            self._progress_window.grab_release()
+            self._progress_window.destroy()
+        self._progress_window = None
+        self._progress_bar = None
+        self.root.config(cursor="")
+        self.root.update_idletasks()
+
+    @contextmanager
+    def _progress_feedback(self, message: str):
+        self._show_progress(message)
+        try:
+            yield
+        finally:
+            self._hide_progress()
+
     def _on_preview_canvas_configure(self, event: tk.Event) -> None:
         bbox = self.preview_canvas.bbox("all")
         if bbox is None:
@@ -344,27 +465,51 @@ class PdfMergeApp:
 
         return max(10, zoom_percent) / 100
 
+    def _get_test_target_directory_for_dialog(self) -> Path | None:
+        source_name = self.source_var.get().strip()
+        test_no = self.test_var.get().strip()
+        if not source_name or not test_no:
+            return None
+
+        try:
+            main_path = get_main_path_for_test(test_no=test_no, source_name=source_name)
+            return resolve_report_pdf_folder(main_path)
+        except Exception:
+            return None
+
     def _select_signature_pdf(self) -> None:
-        path = filedialog.askopenfilename(
-            title="İmza Sayfası PDF Seç",
-            filetypes=[("PDF", "*.pdf")],
-        )
+        initial_dir = self._get_test_target_directory_for_dialog()
+        dialog_kwargs: dict[str, Any] = {
+            "title": "İmza Sayfası PDF Seç",
+            "filetypes": [("PDF", "*.pdf")],
+        }
+        if initial_dir:
+            dialog_kwargs["initialdir"] = str(initial_dir)
+
+        path = filedialog.askopenfilename(**dialog_kwargs)
         if not path:
             return
         self.signature_pdf = Path(path)
         self.signature_label.config(text=self.signature_pdf.name)
-        self._update_signature_preview()
+        with self._progress_feedback("İmza PDF önizlemesi hazırlanıyor..."):
+            self._update_signature_preview()
 
     def _select_report_pdf(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Rapor PDF Seç",
-            filetypes=[("PDF", "*.pdf")],
-        )
+        initial_dir = self._get_test_target_directory_for_dialog()
+        dialog_kwargs: dict[str, Any] = {
+            "title": "Rapor PDF Seç",
+            "filetypes": [("PDF", "*.pdf")],
+        }
+        if initial_dir:
+            dialog_kwargs["initialdir"] = str(initial_dir)
+
+        path = filedialog.askopenfilename(**dialog_kwargs)
         if not path:
             return
         self.report_pdf = Path(path)
         self.report_label.config(text=self.report_pdf.name)
-        self._update_report_preview()
+        with self._progress_feedback("Rapor PDF önizlemesi hazırlanıyor..."):
+            self._update_report_preview()
 
     def _rotate_signature(self, step: int) -> None:
         self.signature_rotation = (self.signature_rotation + step) % 360
@@ -554,6 +699,50 @@ class PdfMergeApp:
         for path in self.merge_pdfs:
             self.merge_listbox.insert(tk.END, path.name)
 
+    def _refresh_test_sources(self) -> None:
+        try:
+            source_names = [table.name for table in iter_test_sources()]
+        except Exception as exc:
+            messagebox.showerror("Veritabanı Hatası", f"Kaynak listesi alınamadı:\n{exc}")
+            return
+
+        self.source_combo["values"] = source_names
+        if source_names and not self.source_var.get():
+            self.source_var.set(source_names[0])
+            self._load_tests_for_source(source_names[0])
+
+    def _on_source_selected(self, _: tk.Event | None = None) -> None:
+        source_name = self.source_var.get()
+        if source_name:
+            self._load_tests_for_source(source_name)
+
+    def _load_tests_for_source(self, source_name: str) -> None:
+        try:
+            tests = fetch_test_numbers(source_name)
+        except Exception as exc:
+            self.test_combo["values"] = []
+            self.test_var.set("")
+            messagebox.showerror("Veritabanı Hatası", f"Test listesi alınamadı:\n{exc}")
+            return
+
+        self.test_combo["values"] = tests
+        if tests:
+            self.test_var.set(tests[0])
+            self._on_test_selected()
+        else:
+            self.test_var.set("")
+
+    def _on_test_selected(self, _: tk.Event | None = None) -> None:
+        test_no = self.test_var.get().strip()
+        if not test_no:
+            self.signed_filename_preview_var.set("<yıl>_<testno>_Report_Signed.pdf")
+            return
+
+        try:
+            self.signed_filename_preview_var.set(build_default_signed_filename(test_no))
+        except ValueError:
+            self.signed_filename_preview_var.set("<yıl>_<testno>_Report_Signed.pdf")
+
     def _merge_and_save(self) -> None:
         if not self._validate_pdf_backend():
             return
@@ -601,8 +790,9 @@ class PdfMergeApp:
             return
 
         try:
-            signature_reader = PdfReader(str(self.signature_pdf))
-            report_reader = PdfReader(str(self.report_pdf))
+            with self._progress_feedback("PDF dosyaları okunuyor..."):
+                signature_reader = PdfReader(str(self.signature_pdf))
+                report_reader = PdfReader(str(self.report_pdf))
         except Exception as exc:  # pragma: no cover
             messagebox.showerror("Dosya okuma hatası", f"PDF dosyaları açılamadı:\n{exc}")
             return
@@ -616,13 +806,18 @@ class PdfMergeApp:
 
         writer = PdfWriter()
 
-        for page in signature_reader.pages:
-            writer.add_page(self._apply_rotation(page, self.signature_rotation))
+        with self._progress_feedback("PDF sayfaları birleştiriliyor..."):
+            for idx, page in enumerate(signature_reader.pages):
+                writer.add_page(self._apply_rotation(page, self.signature_rotation))
+                if idx % 3 == 0:
+                    self._update_progress()
 
-        for page in report_reader.pages[1:]:
-            writer.add_page(self._apply_rotation(page, self.report_rotation))
+            for idx, page in enumerate(report_reader.pages[1:]):
+                writer.add_page(self._apply_rotation(page, self.report_rotation))
+                if idx % 3 == 0:
+                    self._update_progress()
 
-        self._save_writer(writer)
+        self._save_writer(writer, signed_mode=True)
 
     def _run_merge_mode(self) -> None:
         if len(self.merge_pdfs) < 2:
@@ -635,17 +830,26 @@ class PdfMergeApp:
         writer = PdfWriter()
 
         try:
-            for pdf_path in self.merge_pdfs:
-                reader = PdfReader(str(pdf_path))
-                for page in reader.pages:
-                    writer.add_page(page)
+            with self._progress_feedback("PDF dosyaları birleştiriliyor..."):
+                for pdf_idx, pdf_path in enumerate(self.merge_pdfs):
+                    reader = PdfReader(str(pdf_path))
+                    for page_idx, page in enumerate(reader.pages):
+                        writer.add_page(page)
+                        if page_idx % 3 == 0:
+                            self._update_progress()
+                    if pdf_idx % 1 == 0:
+                        self._update_progress()
         except Exception as exc:  # pragma: no cover
             messagebox.showerror("Dosya işleme hatası", f"PDF birleştirme sırasında hata oluştu:\n{exc}")
             return
 
-        self._save_writer(writer)
+        self._save_writer(writer, signed_mode=False)
 
-    def _save_writer(self, writer: PdfWriterProtocol) -> None:
+    def _save_writer(self, writer: PdfWriterProtocol, *, signed_mode: bool) -> None:
+        if signed_mode:
+            self._save_signed_writer_to_test_folder(writer)
+            return
+
         save_path = filedialog.asksaveasfilename(
             title="Birleşik PDF dosyasını kaydet",
             defaultextension=".pdf",
@@ -655,13 +859,63 @@ class PdfMergeApp:
             return
 
         try:
-            with open(save_path, "wb") as output_file:
-                writer.write(output_file)
+            with self._progress_feedback("PDF dosyası kaydediliyor..."):
+                with open(save_path, "wb") as output_file:
+                    writer.write(output_file)
         except Exception as exc:  # pragma: no cover
             messagebox.showerror("Kaydetme hatası", f"Dosya kaydedilemedi:\n{exc}")
             return
 
         messagebox.showinfo("Başarılı", "PDF dosyası başarıyla birleştirildi ve kaydedildi.")
+
+    def _save_signed_writer_to_test_folder(self, writer: PdfWriterProtocol) -> None:
+        source_name = self.source_var.get().strip()
+        test_no = self.test_var.get().strip()
+        if not source_name or not test_no:
+            messagebox.showerror(
+                "Test seçimi eksik",
+                "İmzalı modda kaydetmek için kaynak ve test seçimi zorunludur.",
+            )
+            return
+
+        try:
+            main_path = get_main_path_for_test(test_no=test_no, source_name=source_name)
+            target_dir = resolve_report_pdf_folder(main_path)
+            default_filename = build_default_signed_filename(test_no)
+            existing_signed = find_existing_signed_pdfs(target_dir, test_no)
+
+            if existing_signed:
+                should_continue = messagebox.askyesno(
+                    "İmzalı PDF zaten var",
+                    "Bu test için imzalanmış PDF bulundu. "
+                    "Aynı isimde değilse kaydetmek istiyor musunuz?",
+                )
+                if not should_continue:
+                    return
+
+            final_path = resolve_versioned_target_path(target_dir, default_filename)
+            with self._progress_feedback("İmzalı PDF test klasörüne kaydediliyor..."):
+                with final_path.open("wb") as output_file:
+                    writer.write(output_file)
+
+        except DatabaseLookupError as exc:
+            messagebox.showerror("Veritabanı Hatası", str(exc))
+            return
+        except ReportFolderResolutionError as exc:
+            messagebox.showerror("Hedef Klasör Hatası", str(exc))
+            return
+        except ValueError as exc:
+            messagebox.showerror("Dosya Adı Hatası", str(exc))
+            return
+        except Exception as exc:  # pragma: no cover
+            messagebox.showerror("Kaydetme Hatası", f"İmzalı PDF kaydedilemedi:\n{exc}")
+            return
+
+        messagebox.showinfo(
+            "Başarılı",
+            "İmzalı PDF test klasörüne kaydedildi.\n"
+            f"Hedef dosya: {final_path}",
+        )
 
 
 def main() -> None:
