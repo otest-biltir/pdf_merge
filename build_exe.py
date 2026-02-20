@@ -9,6 +9,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 MAIN_FILE = PROJECT_ROOT / "main.py"
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
+ICON_FILE = PROJECT_ROOT / "converted_logo.ico"
 DIST_DIR = PROJECT_ROOT / "dist"
 BUILD_DIR = PROJECT_ROOT / "build"
 SPEC_FILE = PROJECT_ROOT / "pdf_merge.spec"
@@ -48,6 +49,7 @@ def clean_artifacts() -> None:
 
 
 def build(one_file: bool = True, windowed: bool = True) -> None:
+    data_separator = ";" if sys.platform.startswith("win") else ":"
     cmd = [
         sys.executable,
         "-m",
@@ -60,8 +62,12 @@ def build(one_file: bool = True, windowed: bool = True) -> None:
         "--hidden-import",
         "fitz",
         "--add-data",
-        f"{REQUIREMENTS_FILE}{';' if sys.platform.startswith('win') else ':'}.",
+        f"{REQUIREMENTS_FILE}{data_separator}.",
     ]
+
+    if ICON_FILE.exists():
+        cmd.extend(["--icon", str(ICON_FILE)])
+        cmd.extend(["--add-data", f"{ICON_FILE}{data_separator}."])
 
     if one_file:
         cmd.append("--onefile")
@@ -119,6 +125,9 @@ def main() -> None:
 
     if not MAIN_FILE.exists():
         raise FileNotFoundError(f"Bulunamadı: {MAIN_FILE}")
+
+    if not ICON_FILE.exists():
+        raise FileNotFoundError(f"Uygulama ikonu bulunamadı: {ICON_FILE}")
 
     if args.dry_run:
         print("Dry-run aktif. Aşağıdaki işlemler yapılacaktı:")

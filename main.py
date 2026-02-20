@@ -44,6 +44,19 @@ def _get_requirements_path() -> Path | None:
     return None
 
 
+def _get_app_icon_path() -> Path | None:
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    icon_path = base_path / "converted_logo.ico"
+    if icon_path.exists():
+        return icon_path
+
+    project_icon = Path(__file__).with_name("converted_logo.ico")
+    if project_icon.exists():
+        return project_icon
+
+    return None
+
+
 def _install_requirements_if_missing() -> None:
     requirements_path = _get_requirements_path()
     if requirements_path is None:
@@ -102,6 +115,7 @@ class PdfMergeApp:
         self.root = root
         self.root.title("PDF Birleştirme Aracı")
         self.root.geometry("980x680")
+        self._set_app_icon()
 
         self.mode_var = tk.StringVar(value="signed")
 
@@ -125,6 +139,16 @@ class PdfMergeApp:
 
         self._build_ui()
         self._refresh_mode_frames()
+
+    def _set_app_icon(self) -> None:
+        icon_path = _get_app_icon_path()
+        if icon_path is None:
+            return
+
+        try:
+            self.root.iconbitmap(default=str(icon_path))
+        except tk.TclError:
+            pass
 
     def _build_ui(self) -> None:
         title = ttk.Label(
