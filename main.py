@@ -5,6 +5,7 @@ import importlib.util
 import subprocess
 import sys
 import tkinter as tk
+import ctypes
 from contextlib import contextmanager
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -56,6 +57,17 @@ def _get_app_icon_path() -> Path | None:
 
     return None
 
+
+
+
+def _set_windows_app_id(app_id: str = "pdfmerge.app") -> None:
+    if not sys.platform.startswith("win"):
+        return
+
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except Exception:
+        pass
 
 def _install_requirements_if_missing() -> None:
     requirements_path = _get_requirements_path()
@@ -145,8 +157,11 @@ class PdfMergeApp:
         if icon_path is None:
             return
 
+        _set_windows_app_id("pdfmerge.desktop")
+
         try:
             self.root.iconbitmap(default=str(icon_path))
+            self.root.wm_iconbitmap(str(icon_path))
         except tk.TclError:
             pass
 
