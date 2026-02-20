@@ -5,6 +5,7 @@ import importlib.util
 import subprocess
 import sys
 import tkinter as tk
+import ctypes
 from contextlib import contextmanager
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -43,6 +44,33 @@ def _get_requirements_path() -> Path | None:
 
     return None
 
+
+def _get_app_icon_path() -> Path | None:
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    icon_candidates = ["converted_logo_white.ico", "converted_logo.ico"]
+
+    for icon_name in icon_candidates:
+        icon_path = base_path / icon_name
+        if icon_path.exists():
+            return icon_path
+
+    for icon_name in icon_candidates:
+        project_icon = Path(__file__).with_name(icon_name)
+        if project_icon.exists():
+            return project_icon
+
+    return None
+
+
+
+def _set_windows_app_id(app_id: str = "pdfmerge.app") -> None:
+    if not sys.platform.startswith("win"):
+        return
+
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except Exception:
+        pass
 
 def _install_requirements_if_missing() -> None:
     requirements_path = _get_requirements_path()
@@ -102,6 +130,7 @@ class PdfMergeApp:
         self.root = root
         self.root.title("PDF Birleştirme Aracı")
         self.root.geometry("980x680")
+        self._set_app_icon()
 
         self.mode_var = tk.StringVar(value="signed")
 
@@ -125,6 +154,21 @@ class PdfMergeApp:
 
         self._build_ui()
         self._refresh_mode_frames()
+
+    def _set_app_icon(self) -> None:
+        icon_path = _get_app_icon_path()
+        if icon_path is None:
+            return
+
+        try:
+            self.root.iconbitmap(str(icon_path))
+        except tk.TclError:
+            pass
+
+        try:
+            self.root.wm_iconbitmap(str(icon_path))
+        except tk.TclError:
+            pass
 
     def _build_ui(self) -> None:
         title = ttk.Label(
@@ -919,6 +963,7 @@ class PdfMergeApp:
 
 
 def main() -> None:
+    _set_windows_app_id("pdfmerge.desktop")
     root = tk.Tk()
     style = ttk.Style(root)
     style.theme_use("clam")
