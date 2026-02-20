@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 MAIN_FILE = PROJECT_ROOT / "main.py"
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 ICON_CANDIDATES = [
-    PROJECT_ROOT / "converted_logo_white.ico",
+    # Şeffaf arka plan korunması için yalnızca nihai icon dosyasını kullan.
     PROJECT_ROOT / "converted_logo.ico",
 ]
 DIST_DIR = PROJECT_ROOT / "dist"
