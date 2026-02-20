@@ -10,8 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 MAIN_FILE = PROJECT_ROOT / "main.py"
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 ICON_CANDIDATES = [
-    PROJECT_ROOT / "converted_logo_white.ico",
     PROJECT_ROOT / "converted_logo.ico",
+    PROJECT_ROOT / "converted_logo_white.ico",
 ]
 DIST_DIR = PROJECT_ROOT / "dist"
 BUILD_DIR = PROJECT_ROOT / "build"
@@ -77,6 +77,7 @@ def build(one_file: bool = True, windowed: bool = True) -> None:
     ]
 
     if icon_file is not None:
+        print(f"Kullanılan ikon dosyası: {icon_file.name}")
         cmd.extend(["--icon", str(icon_file)])
         cmd.extend(["--add-data", f"{icon_file}{data_separator}."])
 

@@ -59,6 +59,8 @@ python build_exe.py
 Build script ayrıca `requirements.txt` içindeki bağımlılıkları build öncesi kurar ve exe içine dahil eder.
 Böylece exe çalışırken `pypdf` / önizleme altyapısı (`PyMuPDF`) eksikliği nedeniyle ayrıca manuel kurulum gerekmez.
 
+`build_exe.py`, ikon seçerken önce `converted_logo.ico` dosyasını kullanır (şeffaf arka planlı sürüm).
+
 Başarılı build sonrası çıktı:
 
 ```text
