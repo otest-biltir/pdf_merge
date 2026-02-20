@@ -47,16 +47,19 @@ def _get_requirements_path() -> Path | None:
 
 def _get_app_icon_path() -> Path | None:
     base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    icon_path = base_path / "converted_logo.ico"
-    if icon_path.exists():
-        return icon_path
+    icon_candidates = ["converted_logo_white.ico", "converted_logo.ico"]
 
-    project_icon = Path(__file__).with_name("converted_logo.ico")
-    if project_icon.exists():
-        return project_icon
+    for icon_name in icon_candidates:
+        icon_path = base_path / icon_name
+        if icon_path.exists():
+            return icon_path
+
+    for icon_name in icon_candidates:
+        project_icon = Path(__file__).with_name(icon_name)
+        if project_icon.exists():
+            return project_icon
 
     return None
-
 
 
 
@@ -157,10 +160,12 @@ class PdfMergeApp:
         if icon_path is None:
             return
 
-        _set_windows_app_id("pdfmerge.desktop")
+        try:
+            self.root.iconbitmap(str(icon_path))
+        except tk.TclError:
+            pass
 
         try:
-            self.root.iconbitmap(default=str(icon_path))
             self.root.wm_iconbitmap(str(icon_path))
         except tk.TclError:
             pass
@@ -958,6 +963,7 @@ class PdfMergeApp:
 
 
 def main() -> None:
+    _set_windows_app_id("pdfmerge.desktop")
     root = tk.Tk()
     style = ttk.Style(root)
     style.theme_use("clam")
