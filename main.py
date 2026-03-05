@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import math
 import subprocess
 import sys
 import tkinter as tk
@@ -142,6 +143,7 @@ class PdfMergeApp:
         self.report_rotation = 0
 
         self.preview_images: list[tk.PhotoImage] = []
+        self._preview_logo_image: tk.PhotoImage | None = None
         self.preview_zoom_var = tk.StringVar(value="200")
         self._preview_mouse_inside = False
         self.source_var = tk.StringVar()
@@ -323,6 +325,8 @@ class PdfMergeApp:
         self.root.bind_all("<MouseWheel>", self._on_preview_mousewheel, add="+")
         self.root.bind_all("<Button-4>", self._on_preview_mousewheel, add="+")
         self.root.bind_all("<Button-5>", self._on_preview_mousewheel, add="+")
+
+        self._render_preview_canvas()
 
         self.merge_frame = ttk.LabelFrame(
             self.content_area,
@@ -670,6 +674,7 @@ class PdfMergeApp:
     def _render_preview_canvas(self) -> None:
         self.preview_canvas.delete("all")
         self.preview_images = []
+        self._draw_preview_background_logo()
 
         y = self._render_pdf_preview(
             pdf_path=self.signature_pdf,
@@ -695,6 +700,70 @@ class PdfMergeApp:
         self.preview_canvas.configure(
             scrollregion=(0, 0, max(canvas_width, 900), max(y + 20, canvas_height))
         )
+
+    def _draw_preview_background_logo(self) -> None:
+        logo = self._get_preview_logo_image()
+        if logo is None:
+            return
+
+        canvas_width = max(self.preview_canvas.winfo_width(), 900)
+        canvas_height = max(self.preview_canvas.winfo_height(), 500)
+        center_x = canvas_width // 2
+        center_y = canvas_height // 2
+
+        self.preview_canvas.create_image(
+            center_x,
+            center_y,
+            image=logo,
+            anchor="center",
+        )
+        self.preview_canvas.create_rectangle(
+            center_x - logo.width() // 2,
+            center_y - logo.height() // 2,
+            center_x + logo.width() // 2,
+            center_y + logo.height() // 2,
+            fill="white",
+            outline="",
+            stipple="gray50",
+        )
+
+    def _get_preview_logo_image(self) -> tk.PhotoImage | None:
+        if self._preview_logo_image is not None:
+            return self._preview_logo_image
+
+        icon_path = _get_app_icon_path()
+        if icon_path is None:
+            return None
+
+        logo_image = self._load_photoimage_from_icon(icon_path)
+        if logo_image is None:
+            return None
+
+        self._preview_logo_image = logo_image
+        return self._preview_logo_image
+
+    def _load_photoimage_from_icon(self, icon_path: Path) -> tk.PhotoImage | None:
+        try:
+            return tk.PhotoImage(file=str(icon_path))
+        except tk.TclError:
+            pass
+
+        if fitz is None:
+            return None
+
+        try:
+            pix = fitz.Pixmap(str(icon_path))
+            if pix.alpha:
+                pix = fitz.Pixmap(fitz.csRGB, pix)
+
+            photo = tk.PhotoImage(data=pix.tobytes("ppm"))
+            scale_ratio = max(photo.width() / 220, photo.height() / 220, 1)
+            downsample = max(1, math.ceil(scale_ratio))
+            if downsample > 1:
+                photo = photo.subsample(downsample, downsample)
+            return photo
+        except Exception:
+            return None
 
     def _add_merge_pdfs(self) -> None:
         paths = filedialog.askopenfilenames(
