@@ -634,10 +634,9 @@ class PdfMergeApp:
 
     def _render_pdf_preview(
         self,
-        pdf_path: Path | None,
+        pdf_path: Path,
         rotation: int,
         section_title: str,
-        empty_text: str,
         start_page: int,
         start_y: int,
     ) -> int:
@@ -653,10 +652,6 @@ class PdfMergeApp:
             font=("Segoe UI", 10, "bold"),
         )
         current_y += 28
-
-        if pdf_path is None:
-            self.preview_canvas.create_text(content_x, current_y, text=empty_text, anchor="nw")
-            return current_y + 30
 
         if not PREVIEW_AVAILABLE:
             self.preview_canvas.create_text(
@@ -723,24 +718,33 @@ class PdfMergeApp:
         self.preview_images = []
         self._draw_preview_watermark()
 
-        y = self._render_pdf_preview(
-            pdf_path=self.signature_pdf,
-            rotation=self.signature_rotation,
-            section_title="İmza PDF - Tüm Sayfalar",
-            empty_text="İmza PDF seçildiğinde tüm sayfaların önizlemesi burada görünecek.",
-            start_page=0,
-            start_y=12,
-        )
+        y = 12
+        rendered_any_preview = False
 
-        y += 22
-        y = self._render_pdf_preview(
-            pdf_path=self.report_pdf,
-            rotation=self.report_rotation,
-            section_title="Rapor PDF - 1. Sayfa Hariç Tüm Sayfalar",
-            empty_text="Rapor PDF seçildiğinde (1. sayfa hariç) tüm sayfaların önizlemesi burada görünecek.",
-            start_page=1,
-            start_y=y,
-        )
+        if self.signature_pdf is not None:
+            y = self._render_pdf_preview(
+                pdf_path=self.signature_pdf,
+                rotation=self.signature_rotation,
+                section_title="İmza PDF - Tüm Sayfalar",
+                start_page=0,
+                start_y=y,
+            )
+            rendered_any_preview = True
+
+        if self.report_pdf is not None:
+            if rendered_any_preview:
+                y += 22
+            y = self._render_pdf_preview(
+                pdf_path=self.report_pdf,
+                rotation=self.report_rotation,
+                section_title="Rapor PDF - 1. Sayfa Hariç Tüm Sayfalar",
+                start_page=1,
+                start_y=y,
+            )
+            rendered_any_preview = True
+
+        if not rendered_any_preview:
+            y = 12
 
         canvas_width = self.preview_canvas.winfo_width()
         canvas_height = self.preview_canvas.winfo_height()
@@ -822,11 +826,8 @@ class PdfMergeApp:
             return
 
         self.test_combo["values"] = tests
-        if tests:
-            self.test_var.set(tests[0])
-            self._on_test_selected()
-        else:
-            self.test_var.set("")
+        self.test_var.set("")
+        self._on_test_selected()
 
     def _on_test_selected(self, _: tk.Event | None = None) -> None:
         test_no = self.test_var.get().strip()
