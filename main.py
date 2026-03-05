@@ -142,6 +142,7 @@ class PdfMergeApp:
         self.report_rotation = 0
 
         self.preview_images: list[tk.PhotoImage] = []
+        self.preview_watermark_image: tk.PhotoImage | None = None
         self.preview_zoom_var = tk.StringVar(value="200")
         self._preview_mouse_inside = False
         self.source_var = tk.StringVar()
@@ -153,7 +154,54 @@ class PdfMergeApp:
         self._progress_bar: ttk.Progressbar | None = None
 
         self._build_ui()
+        self.preview_watermark_image = self._build_preview_watermark_image()
+        self._render_preview_canvas()
         self._refresh_mode_frames()
+
+    def _build_preview_watermark_image(self) -> tk.PhotoImage | None:
+        icon_path = _get_app_icon_path()
+        if icon_path is None or fitz is None:
+            return None
+
+        try:
+            pix = fitz.Pixmap(str(icon_path))
+        except Exception:
+            return None
+
+        try:
+            rgb_pix = fitz.Pixmap(fitz.csRGB, pix)
+        except Exception:
+            rgb_pix = pix
+
+        width = rgb_pix.width
+        height = rgb_pix.height
+        channels = rgb_pix.n
+        if channels < 3 or width <= 0 or height <= 0:
+            return None
+
+        softened = bytearray(rgb_pix.samples)
+        opacity = 0.28
+
+        for idx in range(0, len(softened), channels):
+            softened[idx] = int(softened[idx] * opacity + 255 * (1 - opacity))
+            softened[idx + 1] = int(softened[idx + 1] * opacity + 255 * (1 - opacity))
+            softened[idx + 2] = int(softened[idx + 2] * opacity + 255 * (1 - opacity))
+
+        header = f"P6\n{width} {height}\n255\n".encode("ascii")
+        rgb_bytes = bytearray(width * height * 3)
+        out_idx = 0
+        for idx in range(0, len(softened), channels):
+            rgb_bytes[out_idx : out_idx + 3] = softened[idx : idx + 3]
+            out_idx += 3
+
+        watermark = tk.PhotoImage(data=header + bytes(rgb_bytes))
+        max_size = 220
+        max_dim = max(width, height)
+        if 0 < max_dim < max_size:
+            zoom_factor = max(1, round(max_size / max_dim))
+            watermark = watermark.zoom(zoom_factor, zoom_factor)
+
+        return watermark
 
     def _set_app_icon(self) -> None:
         icon_path = _get_app_icon_path()
@@ -670,6 +718,16 @@ class PdfMergeApp:
     def _render_preview_canvas(self) -> None:
         self.preview_canvas.delete("all")
         self.preview_images = []
+
+        if self.preview_watermark_image is not None:
+            canvas_width = max(self.preview_canvas.winfo_width(), 900)
+            canvas_height = max(self.preview_canvas.winfo_height(), 620)
+            self.preview_canvas.create_image(
+                canvas_width // 2,
+                canvas_height // 2,
+                image=self.preview_watermark_image,
+                anchor="center",
+            )
 
         y = self._render_pdf_preview(
             pdf_path=self.signature_pdf,
