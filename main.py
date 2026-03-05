@@ -287,8 +287,6 @@ class PdfMergeApp:
 
         self.signed_controls_frame.columnconfigure(0, weight=1)
 
-        self._refresh_test_sources()
-
         ttk.Button(
             self.sidebar,
             text="Birleştir ve Kaydet",
@@ -331,6 +329,8 @@ class PdfMergeApp:
         self.root.bind_all("<MouseWheel>", self._on_preview_mousewheel, add="+")
         self.root.bind_all("<Button-4>", self._on_preview_mousewheel, add="+")
         self.root.bind_all("<Button-5>", self._on_preview_mousewheel, add="+")
+
+        self._refresh_test_sources()
 
         self.merge_frame = ttk.LabelFrame(
             self.content_area,
@@ -716,6 +716,9 @@ class PdfMergeApp:
             return current_y + 30
 
     def _render_preview_canvas(self) -> None:
+        if not hasattr(self, "preview_canvas"):
+            return
+
         self.preview_canvas.delete("all")
         self.preview_images = []
         self._draw_preview_watermark()
