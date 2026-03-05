@@ -829,12 +829,96 @@ class PdfMergeApp:
         test_no = self.test_var.get().strip()
         if not test_no:
             self.signed_filename_preview_var.set("<yıl>_<testno>_Report_Signed.pdf")
+            self._clear_auto_selected_pdfs()
             return
 
         try:
             self.signed_filename_preview_var.set(build_default_signed_filename(test_no))
         except ValueError:
             self.signed_filename_preview_var.set("<yıl>_<testno>_Report_Signed.pdf")
+
+        self._auto_select_test_pdfs()
+
+    def _normalize_match_text(self, text: str) -> str:
+        return "".join(char for char in text.lower() if char.isalnum())
+
+    def _find_best_report_pdf(self, folder: Path, test_no: str) -> Path | None:
+        target_prefix = self._normalize_match_text(f"{test_no}_Final_Report")
+
+        candidates = [path for path in folder.glob("*.pdf") if path.is_file()]
+        if not candidates:
+            return None
+
+        def _score(path: Path) -> tuple[int, int, int, float]:
+            stem_norm = self._normalize_match_text(path.stem)
+            exact = int(stem_norm == target_prefix)
+            starts_with = int(stem_norm.startswith(target_prefix))
+            contains = int(target_prefix in stem_norm)
+
+            return (exact, starts_with, contains, path.stat().st_mtime)
+
+        best = max(candidates, key=_score)
+        if _score(best)[:3] == (0, 0, 0):
+            return None
+        return best
+
+    def _find_best_signature_pdf(self, folder: Path, test_no: str) -> Path | None:
+        normalized_test = self._normalize_match_text(test_no)
+        signature_markers = [
+            "firstpage",
+            "first_page",
+            "ilksayfa",
+            "ilk_sayfa",
+            "ilk-sayfa",
+            "ilk sayfa",
+        ]
+
+        candidates = [path for path in folder.glob("*.pdf") if path.is_file()]
+        if not candidates:
+            return None
+
+        def _score(path: Path) -> tuple[int, int, float]:
+            name_lower = path.stem.lower()
+            marker_match = int(any(marker in name_lower for marker in signature_markers))
+            test_match = int(normalized_test in self._normalize_match_text(path.stem)) if normalized_test else 0
+            return (marker_match, test_match, path.stat().st_mtime)
+
+        best = max(candidates, key=_score)
+        if _score(best)[0] == 0:
+            return None
+        return best
+
+    def _clear_auto_selected_pdfs(self) -> None:
+        self.signature_pdf = None
+        self.report_pdf = None
+        self.signature_rotation = 0
+        self.report_rotation = 0
+        self.signature_label.config(text="Henüz seçilmedi")
+        self.report_label.config(text="Henüz seçilmedi")
+        self.signature_rotation_label.config(text="İmza yönü: 0°")
+        self.report_rotation_label.config(text="Rapor yönü: 0°")
+        self._render_preview_canvas()
+
+    def _auto_select_test_pdfs(self) -> None:
+        target_dir = self._get_test_target_directory_for_dialog()
+        if target_dir is None or not target_dir.exists() or not target_dir.is_dir():
+            self._clear_auto_selected_pdfs()
+            return
+
+        test_no = self.test_var.get().strip()
+        selected_report = self._find_best_report_pdf(target_dir, test_no)
+        selected_signature = self._find_best_signature_pdf(target_dir, test_no)
+
+        self.report_pdf = selected_report
+        self.signature_pdf = selected_signature
+        self.report_rotation = 0
+        self.signature_rotation = 0
+
+        self.report_label.config(text=selected_report.name if selected_report else "Henüz seçilmedi")
+        self.signature_label.config(text=selected_signature.name if selected_signature else "Henüz seçilmedi")
+        self.signature_rotation_label.config(text="İmza yönü: 0°")
+        self.report_rotation_label.config(text="Rapor yönü: 0°")
+        self._render_preview_canvas()
 
     def _merge_and_save(self) -> None:
         if not self._validate_pdf_backend():
