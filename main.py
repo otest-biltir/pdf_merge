@@ -73,6 +73,9 @@ def _set_windows_app_id(app_id: str = "pdfmerge.app") -> None:
         pass
 
 def _install_requirements_if_missing() -> None:
+    if getattr(sys, "frozen", False):
+        return
+
     requirements_path = _get_requirements_path()
     if requirements_path is None:
         return
