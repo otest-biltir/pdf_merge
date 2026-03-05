@@ -142,6 +142,7 @@ class PdfMergeApp:
         self.report_rotation = 0
 
         self.preview_images: list[tk.PhotoImage] = []
+        self._preview_logo_image: tk.PhotoImage | None = None
         self.preview_zoom_var = tk.StringVar(value="200")
         self._preview_mouse_inside = False
         self.source_var = tk.StringVar()
@@ -154,6 +155,7 @@ class PdfMergeApp:
 
         self._build_ui()
         self._refresh_mode_frames()
+        self._render_preview_canvas()
 
     def _set_app_icon(self) -> None:
         icon_path = _get_app_icon_path()
@@ -169,6 +171,16 @@ class PdfMergeApp:
             self.root.wm_iconbitmap(str(icon_path))
         except tk.TclError:
             pass
+
+    def _load_preview_logo(self) -> tk.PhotoImage | None:
+        icon_path = _get_app_icon_path()
+        if icon_path is None:
+            return None
+
+        try:
+            return tk.PhotoImage(file=str(icon_path))
+        except tk.TclError:
+            return None
 
     def _build_ui(self) -> None:
         title = ttk.Label(
@@ -310,6 +322,7 @@ class PdfMergeApp:
         ttk.Label(zoom_row, text="%").grid(row=0, column=2, sticky="w")
 
         self.preview_canvas = tk.Canvas(self.preview_frame, highlightthickness=0)
+        self._preview_logo_image = self._load_preview_logo()
         preview_scrollbar = ttk.Scrollbar(self.preview_frame, orient="vertical", command=self.preview_canvas.yview)
         self.preview_canvas.configure(yscrollcommand=preview_scrollbar.set)
 
@@ -466,6 +479,8 @@ class PdfMergeApp:
             self._hide_progress()
 
     def _on_preview_canvas_configure(self, event: tk.Event) -> None:
+        self.preview_canvas.coords("preview_logo", event.width // 2, event.height // 2)
+
         bbox = self.preview_canvas.bbox("all")
         if bbox is None:
             self.preview_canvas.configure(scrollregion=(0, 0, event.width, event.height))
@@ -670,6 +685,17 @@ class PdfMergeApp:
     def _render_preview_canvas(self) -> None:
         self.preview_canvas.delete("all")
         self.preview_images = []
+
+        if self._preview_logo_image is not None:
+            canvas_width = max(self.preview_canvas.winfo_width(), 1)
+            canvas_height = max(self.preview_canvas.winfo_height(), 1)
+            self.preview_canvas.create_image(
+                canvas_width // 2,
+                canvas_height // 2,
+                image=self._preview_logo_image,
+                anchor="center",
+                tags=("preview_logo",),
+            )
 
         y = self._render_pdf_preview(
             pdf_path=self.signature_pdf,
