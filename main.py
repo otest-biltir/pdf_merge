@@ -124,6 +124,12 @@ if importlib.util.find_spec("fitz") is not None:
 
 PREVIEW_ZOOM_OPTIONS = [100, 110, 125, 150, 175, 200, 250, 300]
 
+try:
+    from PIL import Image, ImageTk  # type: ignore[import-untyped]
+except Exception:  # pragma: no cover
+    Image = None
+    ImageTk = None
+
 
 class PdfMergeApp:
     def __init__(self, root: tk.Tk) -> None:
@@ -142,6 +148,7 @@ class PdfMergeApp:
         self.report_rotation = 0
 
         self.preview_images: list[tk.PhotoImage] = []
+        self.preview_watermark_image: tk.PhotoImage | Any | None = None
         self.preview_zoom_var = tk.StringVar(value="200")
         self._preview_mouse_inside = False
         self.source_var = tk.StringVar()
@@ -280,8 +287,6 @@ class PdfMergeApp:
 
         self.signed_controls_frame.columnconfigure(0, weight=1)
 
-        self._refresh_test_sources()
-
         ttk.Button(
             self.sidebar,
             text="Birleştir ve Kaydet",
@@ -317,12 +322,15 @@ class PdfMergeApp:
         preview_scrollbar.grid(row=1, column=1, sticky="ns")
 
         self.preview_canvas.bind("<Configure>", self._on_preview_canvas_configure)
+        self._load_preview_watermark_image()
 
         self.preview_canvas.bind("<Enter>", self._set_preview_mouse_inside)
         self.preview_canvas.bind("<Leave>", self._set_preview_mouse_outside)
         self.root.bind_all("<MouseWheel>", self._on_preview_mousewheel, add="+")
         self.root.bind_all("<Button-4>", self._on_preview_mousewheel, add="+")
         self.root.bind_all("<Button-5>", self._on_preview_mousewheel, add="+")
+
+        self._refresh_test_sources()
 
         self.merge_frame = ttk.LabelFrame(
             self.content_area,
@@ -469,12 +477,52 @@ class PdfMergeApp:
         bbox = self.preview_canvas.bbox("all")
         if bbox is None:
             self.preview_canvas.configure(scrollregion=(0, 0, event.width, event.height))
+            self._draw_preview_watermark()
             return
 
         _, _, content_width, content_height = bbox
         self.preview_canvas.configure(
             scrollregion=(0, 0, max(content_width, event.width), max(content_height, event.height))
         )
+        self._draw_preview_watermark()
+
+    def _load_preview_watermark_image(self) -> None:
+        icon_path = _get_app_icon_path()
+        if icon_path is None:
+            return
+
+        if Image is not None and ImageTk is not None:
+            try:
+                with Image.open(icon_path) as img:
+                    rgba = img.convert("RGBA")
+                    new_alpha = rgba.getchannel("A").point(lambda value: int(value * 0.24))
+                    rgba.putalpha(new_alpha)
+                    self.preview_watermark_image = ImageTk.PhotoImage(rgba)
+                    return
+            except Exception:
+                pass
+
+        try:
+            self.preview_watermark_image = tk.PhotoImage(file=str(icon_path))
+        except Exception:
+            self.preview_watermark_image = None
+
+    def _draw_preview_watermark(self) -> None:
+        self.preview_canvas.delete("preview_watermark")
+
+        if self.preview_watermark_image is None:
+            return
+
+        canvas_width = max(self.preview_canvas.winfo_width(), 1)
+        canvas_height = max(self.preview_canvas.winfo_height(), 1)
+        self.preview_canvas.create_image(
+            canvas_width // 2,
+            canvas_height // 2,
+            image=self.preview_watermark_image,
+            anchor="center",
+            tags="preview_watermark",
+        )
+        self.preview_canvas.tag_lower("preview_watermark")
 
     def _set_preview_mouse_inside(self, _: tk.Event) -> None:
         self._preview_mouse_inside = True
@@ -586,10 +634,9 @@ class PdfMergeApp:
 
     def _render_pdf_preview(
         self,
-        pdf_path: Path | None,
+        pdf_path: Path,
         rotation: int,
         section_title: str,
-        empty_text: str,
         start_page: int,
         start_y: int,
     ) -> int:
@@ -605,10 +652,6 @@ class PdfMergeApp:
             font=("Segoe UI", 10, "bold"),
         )
         current_y += 28
-
-        if pdf_path is None:
-            self.preview_canvas.create_text(content_x, current_y, text=empty_text, anchor="nw")
-            return current_y + 30
 
         if not PREVIEW_AVAILABLE:
             self.preview_canvas.create_text(
@@ -668,27 +711,40 @@ class PdfMergeApp:
             return current_y + 30
 
     def _render_preview_canvas(self) -> None:
+        if not hasattr(self, "preview_canvas"):
+            return
+
         self.preview_canvas.delete("all")
         self.preview_images = []
+        self._draw_preview_watermark()
 
-        y = self._render_pdf_preview(
-            pdf_path=self.signature_pdf,
-            rotation=self.signature_rotation,
-            section_title="İmza PDF - Tüm Sayfalar",
-            empty_text="İmza PDF seçildiğinde tüm sayfaların önizlemesi burada görünecek.",
-            start_page=0,
-            start_y=12,
-        )
+        y = 12
+        rendered_any_preview = False
 
-        y += 22
-        y = self._render_pdf_preview(
-            pdf_path=self.report_pdf,
-            rotation=self.report_rotation,
-            section_title="Rapor PDF - 1. Sayfa Hariç Tüm Sayfalar",
-            empty_text="Rapor PDF seçildiğinde (1. sayfa hariç) tüm sayfaların önizlemesi burada görünecek.",
-            start_page=1,
-            start_y=y,
-        )
+        if self.signature_pdf is not None:
+            y = self._render_pdf_preview(
+                pdf_path=self.signature_pdf,
+                rotation=self.signature_rotation,
+                section_title="İmza PDF - Tüm Sayfalar",
+                start_page=0,
+                start_y=y,
+            )
+            rendered_any_preview = True
+
+        if self.report_pdf is not None:
+            if rendered_any_preview:
+                y += 22
+            y = self._render_pdf_preview(
+                pdf_path=self.report_pdf,
+                rotation=self.report_rotation,
+                section_title="Rapor PDF - 1. Sayfa Hariç Tüm Sayfalar",
+                start_page=1,
+                start_y=y,
+            )
+            rendered_any_preview = True
+
+        if not rendered_any_preview:
+            y = 12
 
         canvas_width = self.preview_canvas.winfo_width()
         canvas_height = self.preview_canvas.winfo_height()
@@ -770,22 +826,103 @@ class PdfMergeApp:
             return
 
         self.test_combo["values"] = tests
-        if tests:
-            self.test_var.set(tests[0])
-            self._on_test_selected()
-        else:
-            self.test_var.set("")
+        self.test_var.set("")
+        self._on_test_selected()
 
     def _on_test_selected(self, _: tk.Event | None = None) -> None:
         test_no = self.test_var.get().strip()
         if not test_no:
             self.signed_filename_preview_var.set("<yıl>_<testno>_Report_Signed.pdf")
+            self._clear_auto_selected_pdfs()
             return
 
         try:
             self.signed_filename_preview_var.set(build_default_signed_filename(test_no))
         except ValueError:
             self.signed_filename_preview_var.set("<yıl>_<testno>_Report_Signed.pdf")
+
+        self._auto_select_test_pdfs()
+
+    def _normalize_match_text(self, text: str) -> str:
+        return "".join(char for char in text.lower() if char.isalnum())
+
+    def _find_best_report_pdf(self, folder: Path, test_no: str) -> Path | None:
+        target_prefix = self._normalize_match_text(f"{test_no}_Final_Report")
+
+        candidates = [path for path in folder.glob("*.pdf") if path.is_file()]
+        if not candidates:
+            return None
+
+        def _score(path: Path) -> tuple[int, int, int, float]:
+            stem_norm = self._normalize_match_text(path.stem)
+            exact = int(stem_norm == target_prefix)
+            starts_with = int(stem_norm.startswith(target_prefix))
+            contains = int(target_prefix in stem_norm)
+
+            return (exact, starts_with, contains, path.stat().st_mtime)
+
+        best = max(candidates, key=_score)
+        if _score(best)[:3] == (0, 0, 0):
+            return None
+        return best
+
+    def _find_best_signature_pdf(self, folder: Path, test_no: str) -> Path | None:
+        normalized_test = self._normalize_match_text(test_no)
+        signature_markers = [
+            "firstpage",
+            "first_page",
+            "ilksayfa",
+            "ilk_sayfa",
+            "ilk-sayfa",
+            "ilk sayfa",
+        ]
+
+        candidates = [path for path in folder.glob("*.pdf") if path.is_file()]
+        if not candidates:
+            return None
+
+        def _score(path: Path) -> tuple[int, int, float]:
+            name_lower = path.stem.lower()
+            marker_match = int(any(marker in name_lower for marker in signature_markers))
+            test_match = int(normalized_test in self._normalize_match_text(path.stem)) if normalized_test else 0
+            return (marker_match, test_match, path.stat().st_mtime)
+
+        best = max(candidates, key=_score)
+        if _score(best)[0] == 0:
+            return None
+        return best
+
+    def _clear_auto_selected_pdfs(self) -> None:
+        self.signature_pdf = None
+        self.report_pdf = None
+        self.signature_rotation = 0
+        self.report_rotation = 0
+        self.signature_label.config(text="Henüz seçilmedi")
+        self.report_label.config(text="Henüz seçilmedi")
+        self.signature_rotation_label.config(text="İmza yönü: 0°")
+        self.report_rotation_label.config(text="Rapor yönü: 0°")
+        self._render_preview_canvas()
+
+    def _auto_select_test_pdfs(self) -> None:
+        target_dir = self._get_test_target_directory_for_dialog()
+        if target_dir is None or not target_dir.exists() or not target_dir.is_dir():
+            self._clear_auto_selected_pdfs()
+            return
+
+        test_no = self.test_var.get().strip()
+        selected_report = self._find_best_report_pdf(target_dir, test_no)
+        selected_signature = self._find_best_signature_pdf(target_dir, test_no)
+
+        self.report_pdf = selected_report
+        self.signature_pdf = selected_signature
+        self.report_rotation = 0
+        self.signature_rotation = 0
+
+        self.report_label.config(text=selected_report.name if selected_report else "Henüz seçilmedi")
+        self.signature_label.config(text=selected_signature.name if selected_signature else "Henüz seçilmedi")
+        self.signature_rotation_label.config(text="İmza yönü: 0°")
+        self.report_rotation_label.config(text="Rapor yönü: 0°")
+        self._render_preview_canvas()
 
     def _merge_and_save(self) -> None:
         if not self._validate_pdf_backend():
