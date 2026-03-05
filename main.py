@@ -124,6 +124,12 @@ if importlib.util.find_spec("fitz") is not None:
 
 PREVIEW_ZOOM_OPTIONS = [100, 110, 125, 150, 175, 200, 250, 300]
 
+try:
+    from PIL import Image, ImageTk  # type: ignore[import-untyped]
+except Exception:  # pragma: no cover
+    Image = None
+    ImageTk = None
+
 
 class PdfMergeApp:
     def __init__(self, root: tk.Tk) -> None:
@@ -142,6 +148,7 @@ class PdfMergeApp:
         self.report_rotation = 0
 
         self.preview_images: list[tk.PhotoImage] = []
+        self.preview_watermark_image: tk.PhotoImage | Any | None = None
         self.preview_zoom_var = tk.StringVar(value="200")
         self._preview_mouse_inside = False
         self.source_var = tk.StringVar()
@@ -317,6 +324,7 @@ class PdfMergeApp:
         preview_scrollbar.grid(row=1, column=1, sticky="ns")
 
         self.preview_canvas.bind("<Configure>", self._on_preview_canvas_configure)
+        self._load_preview_watermark_image()
 
         self.preview_canvas.bind("<Enter>", self._set_preview_mouse_inside)
         self.preview_canvas.bind("<Leave>", self._set_preview_mouse_outside)
@@ -469,12 +477,52 @@ class PdfMergeApp:
         bbox = self.preview_canvas.bbox("all")
         if bbox is None:
             self.preview_canvas.configure(scrollregion=(0, 0, event.width, event.height))
+            self._draw_preview_watermark()
             return
 
         _, _, content_width, content_height = bbox
         self.preview_canvas.configure(
             scrollregion=(0, 0, max(content_width, event.width), max(content_height, event.height))
         )
+        self._draw_preview_watermark()
+
+    def _load_preview_watermark_image(self) -> None:
+        icon_path = _get_app_icon_path()
+        if icon_path is None:
+            return
+
+        if Image is not None and ImageTk is not None:
+            try:
+                with Image.open(icon_path) as img:
+                    rgba = img.convert("RGBA")
+                    new_alpha = rgba.getchannel("A").point(lambda value: int(value * 0.24))
+                    rgba.putalpha(new_alpha)
+                    self.preview_watermark_image = ImageTk.PhotoImage(rgba)
+                    return
+            except Exception:
+                pass
+
+        try:
+            self.preview_watermark_image = tk.PhotoImage(file=str(icon_path))
+        except Exception:
+            self.preview_watermark_image = None
+
+    def _draw_preview_watermark(self) -> None:
+        self.preview_canvas.delete("preview_watermark")
+
+        if self.preview_watermark_image is None:
+            return
+
+        canvas_width = max(self.preview_canvas.winfo_width(), 1)
+        canvas_height = max(self.preview_canvas.winfo_height(), 1)
+        self.preview_canvas.create_image(
+            canvas_width // 2,
+            canvas_height // 2,
+            image=self.preview_watermark_image,
+            anchor="center",
+            tags="preview_watermark",
+        )
+        self.preview_canvas.tag_lower("preview_watermark")
 
     def _set_preview_mouse_inside(self, _: tk.Event) -> None:
         self._preview_mouse_inside = True
@@ -670,6 +718,7 @@ class PdfMergeApp:
     def _render_preview_canvas(self) -> None:
         self.preview_canvas.delete("all")
         self.preview_images = []
+        self._draw_preview_watermark()
 
         y = self._render_pdf_preview(
             pdf_path=self.signature_pdf,
