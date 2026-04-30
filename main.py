@@ -1031,7 +1031,7 @@ class PdfMergeApp:
 
     def _save_writer(self, writer: PdfWriterProtocol, *, signed_mode: bool) -> None:
         if signed_mode:
-            self._save_signed_writer_to_test_folder(writer)
+            self._save_signed_writer(writer)
             return
 
         save_path = filedialog.asksaveasfilename(
@@ -1052,33 +1052,45 @@ class PdfMergeApp:
 
         messagebox.showinfo("Başarılı", "PDF dosyası başarıyla birleştirildi ve kaydedildi.")
 
-    def _save_signed_writer_to_test_folder(self, writer: PdfWriterProtocol) -> None:
+    def _save_signed_writer(self, writer: PdfWriterProtocol) -> None:
         source_name = self.source_var.get().strip()
         test_no = self.test_var.get().strip()
-        if not source_name or not test_no:
-            messagebox.showerror(
-                "Test seçimi eksik",
-                "İmzalı modda kaydetmek için kaynak ve test seçimi zorunludur.",
-            )
-            return
+        target_dir: Path | None = None
+        default_filename = "Signed_Report.pdf"
+        existing_signed: list[Path] = []
 
         try:
-            main_path = get_main_path_for_test(test_no=test_no, source_name=source_name)
-            target_dir = resolve_report_pdf_folder(main_path)
-            default_filename = build_default_signed_filename(test_no)
-            existing_signed = find_existing_signed_pdfs(target_dir, test_no)
+            if source_name and test_no:
+                main_path = get_main_path_for_test(test_no=test_no, source_name=source_name)
+                target_dir = resolve_report_pdf_folder(main_path)
+                default_filename = build_default_signed_filename(test_no)
+                existing_signed = find_existing_signed_pdfs(target_dir, test_no)
 
-            if existing_signed:
-                should_continue = messagebox.askyesno(
-                    "İmzalı PDF zaten var",
-                    "Bu test için imzalanmış PDF bulundu. "
-                    "Aynı isimde değilse kaydetmek istiyor musunuz?",
-                )
-                if not should_continue:
-                    return
+                if existing_signed:
+                    should_continue = messagebox.askyesno(
+                        "İmzalı PDF zaten var",
+                        "Bu test için imzalanmış PDF bulundu. "
+                        "Aynı isimde değilse kaydetmek istiyor musunuz?",
+                    )
+                    if not should_continue:
+                        return
 
-            final_path = resolve_versioned_target_path(target_dir, default_filename)
-            with self._progress_feedback("İmzalı PDF test klasörüne kaydediliyor..."):
+            dialog_kwargs: dict[str, Any] = {
+                "title": "İmzalanmış PDF dosyasını kaydet",
+                "defaultextension": ".pdf",
+                "filetypes": [("PDF", "*.pdf")],
+                "initialfile": default_filename,
+            }
+            if target_dir is not None:
+                dialog_kwargs["initialdir"] = str(target_dir)
+
+            save_path = filedialog.asksaveasfilename(**dialog_kwargs)
+            if not save_path:
+                return
+
+            final_path = Path(save_path)
+            final_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._progress_feedback("İmzalı PDF kaydediliyor..."):
                 with final_path.open("wb") as output_file:
                     writer.write(output_file)
 
@@ -1097,7 +1109,7 @@ class PdfMergeApp:
 
         messagebox.showinfo(
             "Başarılı",
-            "İmzalı PDF test klasörüne kaydedildi.\n"
+            "İmzalı PDF kaydedildi.\n"
             f"Hedef dosya: {final_path}",
         )
 
